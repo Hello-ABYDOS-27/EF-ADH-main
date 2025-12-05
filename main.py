@@ -2338,56 +2338,56 @@ def handle_events():
                         current_state = GameState.HOSPITAL  # 返回游戏场景
 
                 # 暂停界面按钮（存档/设置/返回副本选择）
-        if is_paused and current_state in [GameState.HOSPITAL, GameState.CAFE]:
-            # 存档按钮
-            btn_height = 50
-            btn_spacing = 30
-            
-            save_btn_width = 150
-            save_btn_y = (config["resolution"][1] // 2) - 100
-            save_btn = pygame.Rect(
-                config["resolution"][0]//2 - save_btn_width//2,
-                save_btn_y,
-                save_btn_width,
-                btn_height
-            )
-            
-            # 设置按钮
-            settings_btn_width = 150
-            settings_btn_y = save_btn_y + btn_height + btn_spacing
-            settings_btn = pygame.Rect(
-                config["resolution"][0]//2 - settings_btn_width//2,
-                settings_btn_y,
-                settings_btn_width,
-                btn_height
-            )
-            
-            # 返回副本选择按钮
-            back_btn_width = 200
-            back_btn_y = settings_btn_y + btn_height + btn_spacing
-            back_btn = pygame.Rect(
-                config["resolution"][0]//2 - back_btn_width//2,
-                back_btn_y,
-                back_btn_width,
-                btn_height
-            )
-            
-            if save_btn.collidepoint(mouse_pos):
-                print("💾 存档成功！（实际项目中需添加文件存储逻辑）")
-            elif settings_btn.collidepoint(mouse_pos):
-                # 进入设置界面
-                is_paused = False
-                pygame.mixer.music.unpause()
-                # 触发动画，从当前状态切换到设置
-                is_animating = True
-                prev_state = current_state
-                next_state = GameState.SETTINGS
-                animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
-            elif back_btn.collidepoint(mouse_pos):
-                current_state = GameState.COPY_SELECT
-                is_paused = False
-                pygame.mixer.music.unpause()
-                stop_bgm()
+                elif is_paused and current_state in [GameState.HOSPITAL, GameState.CAFE]:
+                    # 存档按钮
+                    btn_height = 50
+                    btn_spacing = 30
+                    
+                    save_btn_width = 150
+                    save_btn_y = (config["resolution"][1] // 2) - 100
+                    save_btn = pygame.Rect(
+                        config["resolution"][0]//2 - save_btn_width//2,
+                        save_btn_y,
+                        save_btn_width,
+                        btn_height
+                    )
+                    
+                    # 设置按钮
+                    settings_btn_width = 150
+                    settings_btn_y = save_btn_y + btn_height + btn_spacing
+                    settings_btn = pygame.Rect(
+                        config["resolution"][0]//2 - settings_btn_width//2,
+                        settings_btn_y,
+                        settings_btn_width,
+                        btn_height
+                    )
+                    
+                    # 返回副本选择按钮
+                    back_btn_width = 200
+                    back_btn_y = settings_btn_y + btn_height + btn_spacing
+                    back_btn = pygame.Rect(
+                        config["resolution"][0]//2 - back_btn_width//2,
+                        back_btn_y,
+                        back_btn_width,
+                        btn_height
+                    )
+                    
+                    if save_btn.collidepoint(mouse_pos):
+                        print("💾 存档成功！（实际项目中需添加文件存储逻辑）")
+                    elif settings_btn.collidepoint(mouse_pos):
+                        # 进入设置界面
+                        is_paused = False
+                        pygame.mixer.music.unpause()
+                        # 触发动画，从当前状态切换到设置
+                        is_animating = True
+                        prev_state = current_state
+                        next_state = GameState.SETTINGS
+                        animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+                    elif back_btn.collidepoint(mouse_pos):
+                        current_state = GameState.COPY_SELECT
+                        is_paused = False
+                        pygame.mixer.music.unpause()
+                        stop_bgm()
 
         # 鼠标松开事件（结束滑杆拖拽）
         if event.type == pygame.MOUSEBUTTONUP:
