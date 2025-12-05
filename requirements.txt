@@ -1,0 +1,9 @@
+# 生产环境依赖（dependencies）
+pygame==2.6.0
+
+# 开发环境依赖（devDependencies）
+# 用于测试和代码质量
+pytest==8.3.0
+black==24.8.0
+flake8==7.1.1
+mypy==1.11.2

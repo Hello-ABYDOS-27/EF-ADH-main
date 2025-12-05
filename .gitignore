@@ -1,0 +1,35 @@
+# 虚拟环境
+.venv/
+
+# Python编译缓存
+__pycache__/
+
+# 忽略test类文件，但保留test/游戏所有废案
+# 忽略所有以test开头或结尾的Python文件
+test*.py
+*_test.py
+test_*.py
+
+# 忽略所有test文件夹，但保留test/游戏所有废案
+/test/
+!/test/游戏所有废案/
+!/test/游戏所有废案/**/*
+
+# 其他开发相关文件
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE相关文件
+.idea/
+*.iml
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
