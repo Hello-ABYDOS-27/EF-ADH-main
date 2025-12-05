@@ -895,10 +895,12 @@ def draw_cafe():
         screen.blit(shadow_text, (pause_text_rect.x + 5, pause_text_rect.y + 5))
         screen.blit(pause_text, pause_text_rect)
 
+        btn_height = 50
+        btn_spacing = 30
+        
         # 存档按钮
         save_btn_width = 150
-        btn_height = 50
-        save_btn_y = (config["resolution"][1] // 2) - 40
+        save_btn_y = (config["resolution"][1] // 2) - 100
         save_btn = pygame.Rect(
             config["resolution"][0]//2 - save_btn_width//2,
             save_btn_y,
@@ -912,9 +914,25 @@ def draw_cafe():
         save_text = option_font.render("存档", True, save_text_color)
         screen.blit(save_text, save_text.get_rect(center=save_btn.center))
         
+        # 设置按钮
+        settings_btn_width = 150
+        settings_btn_y = save_btn_y + btn_height + btn_spacing
+        settings_btn = pygame.Rect(
+            config["resolution"][0]//2 - settings_btn_width//2,
+            settings_btn_y,
+            settings_btn_width,
+            btn_height
+        )
+        settings_is_hovered = settings_btn.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, (60, 120, 200), settings_btn)
+        pygame.draw.rect(screen, (100, 180, 255) if settings_is_hovered else (0, 0, 0), settings_btn, 2)
+        settings_text_color = (255, 255, 255) if settings_is_hovered else (200, 200, 200)
+        settings_text = option_font.render("设置", True, settings_text_color)
+        screen.blit(settings_text, settings_text.get_rect(center=settings_btn.center))
+        
         # 返回副本选择按钮
         back_btn_width = 200  # 增加按钮宽度以容纳更长文本
-        back_btn_y = save_btn_y + btn_height + 30
+        back_btn_y = settings_btn_y + btn_height + btn_spacing
         back_btn = pygame.Rect(
             config["resolution"][0]//2 - back_btn_width//2,
             back_btn_y,
@@ -2172,12 +2190,6 @@ def handle_events():
                 # 主菜单界面 - 无论当前状态是什么，都检查主菜单按钮，因为我们保留了主菜单
                 start_btn, setting_btn, info_btn, quit_btn = draw_main_menu()
                 
-                # 绘制设置图标并获取其碰撞矩形
-                if current_state != GameState.SETTINGS:
-                    settings_icon_rect = draw_settings_icon()
-                else:
-                    settings_icon_rect = None
-                
                 # 动画正在运行时，忽略所有按钮点击（除了退出确认）
                 if not is_animating:
                     if start_btn.collidepoint(mouse_pos):
@@ -2207,13 +2219,6 @@ def handle_events():
                     elif quit_btn.collidepoint(mouse_pos):
                         # 显示退出确认弹窗，不使用动画
                         current_state = GameState.QUIT_CONFIRM
-                    # 检查设置图标点击
-                    elif settings_icon_rect and settings_icon_rect.collidepoint(mouse_pos):
-                        # 切换到设置界面
-                        is_animating = True
-                        prev_state = current_state
-                        next_state = GameState.SETTINGS
-                        animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
 
                 # 处理当前状态的按钮点击，无论动画是否正在播放
                 # 退出确认弹窗
@@ -2332,34 +2337,57 @@ def handle_events():
                         dialog_shown = False
                         current_state = GameState.HOSPITAL  # 返回游戏场景
 
-                # 暂停界面按钮（存档/返回副本选择）
-                if is_paused and current_state in [GameState.HOSPITAL, GameState.CAFE]:
-                    # 存档按钮
-                    save_btn_width = 150
-                    btn_height = 50
-                    save_btn_y = (config["resolution"][1] // 2) - 40
-                    save_btn = pygame.Rect(
-                        config["resolution"][0]//2 - save_btn_width//2,
-                        save_btn_y,
-                        save_btn_width,
-                        btn_height
-                    )
-                    # 返回副本选择按钮
-                    back_btn_width = 200
-                    back_btn_y = save_btn_y + btn_height + 30
-                    back_btn = pygame.Rect(
-                        config["resolution"][0]//2 - back_btn_width//2,
-                        back_btn_y,
-                        back_btn_width,
-                        btn_height
-                    )
-                    if save_btn.collidepoint(mouse_pos):
-                        print("💾 存档成功！（实际项目中需添加文件存储逻辑）")
-                    elif back_btn.collidepoint(mouse_pos):
-                        current_state = GameState.COPY_SELECT
-                        is_paused = False
-                        pygame.mixer.music.unpause()
-                        stop_bgm()
+                # 暂停界面按钮（存档/设置/返回副本选择）
+        if is_paused and current_state in [GameState.HOSPITAL, GameState.CAFE]:
+            # 存档按钮
+            btn_height = 50
+            btn_spacing = 30
+            
+            save_btn_width = 150
+            save_btn_y = (config["resolution"][1] // 2) - 100
+            save_btn = pygame.Rect(
+                config["resolution"][0]//2 - save_btn_width//2,
+                save_btn_y,
+                save_btn_width,
+                btn_height
+            )
+            
+            # 设置按钮
+            settings_btn_width = 150
+            settings_btn_y = save_btn_y + btn_height + btn_spacing
+            settings_btn = pygame.Rect(
+                config["resolution"][0]//2 - settings_btn_width//2,
+                settings_btn_y,
+                settings_btn_width,
+                btn_height
+            )
+            
+            # 返回副本选择按钮
+            back_btn_width = 200
+            back_btn_y = settings_btn_y + btn_height + btn_spacing
+            back_btn = pygame.Rect(
+                config["resolution"][0]//2 - back_btn_width//2,
+                back_btn_y,
+                back_btn_width,
+                btn_height
+            )
+            
+            if save_btn.collidepoint(mouse_pos):
+                print("💾 存档成功！（实际项目中需添加文件存储逻辑）")
+            elif settings_btn.collidepoint(mouse_pos):
+                # 进入设置界面
+                is_paused = False
+                pygame.mixer.music.unpause()
+                # 触发动画，从当前状态切换到设置
+                is_animating = True
+                prev_state = current_state
+                next_state = GameState.SETTINGS
+                animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+            elif back_btn.collidepoint(mouse_pos):
+                current_state = GameState.COPY_SELECT
+                is_paused = False
+                pygame.mixer.music.unpause()
+                stop_bgm()
 
         # 鼠标松开事件（结束滑杆拖拽）
         if event.type == pygame.MOUSEBUTTONUP:
@@ -2486,10 +2514,6 @@ def main():
                     current_state = GameState.HOSPITAL
             elif current_state == GameState.QUIT_CONFIRM:
                 draw_quit_confirm()
-            
-            # 绘制设置图标（除了设置界面外都显示）
-            if current_state != GameState.SETTINGS:
-                draw_settings_icon()
 
         # 刷新屏幕
         pygame.display.flip()
