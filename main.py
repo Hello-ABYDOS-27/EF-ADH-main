@@ -984,6 +984,65 @@ def draw_main_menu():
 
     return start_btn, setting_btn, info_btn, quit_btn
 
+# 设置图标绘制函数
+def draw_settings_icon():
+    """绘制左下角的设置图标
+    
+    Returns:
+        pygame.Rect: 设置图标的碰撞矩形
+    """
+    icon_size = 50
+    icon_margin = 20
+    
+    # 图标位置：左下角
+    icon_x = icon_margin
+    icon_y = config["resolution"][1] - icon_size - icon_margin
+    
+    # 创建图标矩形
+    icon_rect = pygame.Rect(icon_x, icon_y, icon_size, icon_size)
+    
+    # 检查鼠标是否悬停
+    mouse_pos = pygame.mouse.get_pos()
+    is_hovered = icon_rect.collidepoint(mouse_pos)
+    
+    # 绘制图标背景
+    if is_hovered:
+        pygame.draw.rect(screen, BUTTON_HOVER, icon_rect, border_radius=10)
+    else:
+        pygame.draw.rect(screen, BUTTON_COLOR, icon_rect, border_radius=10)
+    
+    # 绘制设置图标（齿轮形状）
+    gear_color = TEXT_COLOR
+    gear_radius = icon_size // 4
+    gear_center = (icon_x + icon_size // 2, icon_y + icon_size // 2)
+    
+    # 绘制齿轮中心
+    pygame.draw.circle(screen, gear_color, gear_center, gear_radius, 2)
+    
+    # 绘制齿轮齿
+    for i in range(8):
+        angle = i * (360 / 8)
+        radians = pygame.math.radians(angle)
+        
+        # 外点
+        outer_x = gear_center[0] + int(gear_radius * 2 * pygame.math.cos(radians))
+        outer_y = gear_center[1] + int(gear_radius * 2 * pygame.math.sin(radians))
+        
+        # 内点
+        inner_x = gear_center[0] + int(gear_radius * 1.2 * pygame.math.cos(radians))
+        inner_y = gear_center[1] + int(gear_radius * 1.2 * pygame.math.sin(radians))
+        
+        # 绘制齿轮齿
+        pygame.draw.line(screen, gear_color, (inner_x, inner_y), (outer_x, outer_y), 3)
+    
+    # 绘制设置文字
+    settings_text = small_font.render("设置", True, TEXT_COLOR)
+    text_x = icon_x + (icon_size - settings_text.get_width()) // 2
+    text_y = icon_y + icon_size + 5
+    screen.blit(settings_text, (text_x, text_y))
+    
+    return icon_rect
+
 # 副本选择界面绘制（含BGM播放）
 def draw_copy_select():
     # 只绘制内容区域，不绘制主菜单（主菜单由draw_animation或main函数单独绘制）
@@ -2094,6 +2153,12 @@ def handle_events():
                 # 主菜单界面 - 无论当前状态是什么，都检查主菜单按钮，因为我们保留了主菜单
                 start_btn, setting_btn, info_btn, quit_btn = draw_main_menu()
                 
+                # 绘制设置图标并获取其碰撞矩形
+                if current_state != GameState.SETTINGS:
+                    settings_icon_rect = draw_settings_icon()
+                else:
+                    settings_icon_rect = None
+                
                 # 动画正在运行时，忽略所有按钮点击（除了退出确认）
                 if not is_animating:
                     if start_btn.collidepoint(mouse_pos):
@@ -2123,6 +2188,13 @@ def handle_events():
                     elif quit_btn.collidepoint(mouse_pos):
                         # 显示退出确认弹窗，不使用动画
                         current_state = GameState.QUIT_CONFIRM
+                    # 检查设置图标点击
+                    elif settings_icon_rect and settings_icon_rect.collidepoint(mouse_pos):
+                        # 切换到设置界面
+                        is_animating = True
+                        prev_state = current_state
+                        next_state = GameState.SETTINGS
+                        animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
 
                 # 处理当前状态的按钮点击，无论动画是否正在播放
                 # 退出确认弹窗
@@ -2395,6 +2467,10 @@ def main():
                     current_state = GameState.HOSPITAL
             elif current_state == GameState.QUIT_CONFIRM:
                 draw_quit_confirm()
+            
+            # 绘制设置图标（除了设置界面外都显示）
+            if current_state != GameState.SETTINGS:
+                draw_settings_icon()
 
         # 刷新屏幕
         pygame.display.flip()
