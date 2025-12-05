@@ -58,7 +58,7 @@
 ### 运行游戏
 
 ```bash
-python 1.py
+python main.py
 ```
 
 ## 游戏操作
