@@ -1,5 +1,6 @@
 import pygame
 import sys
+import math
 
 # 初始化Pygame与音频模块
 pygame.init()
@@ -708,10 +709,12 @@ def draw_hospital():
         screen.blit(shadow_text, (pause_text_rect.x + 5, pause_text_rect.y + 5))
         screen.blit(pause_text, pause_text_rect)
 
+        btn_height = 50
+        btn_spacing = 30
+        
         # 存档按钮
         save_btn_width = 150
-        btn_height = 50
-        save_btn_y = (config["resolution"][1] // 2) - 40
+        save_btn_y = (config["resolution"][1] // 2) - 100
         save_btn = pygame.Rect(
             config["resolution"][0]//2 - save_btn_width//2,
             save_btn_y,
@@ -725,9 +728,25 @@ def draw_hospital():
         save_text = option_font.render("存档", True, save_text_color)
         screen.blit(save_text, save_text.get_rect(center=save_btn.center))
         
+        # 设置按钮
+        settings_btn_width = 150
+        settings_btn_y = save_btn_y + btn_height + btn_spacing
+        settings_btn = pygame.Rect(
+            config["resolution"][0]//2 - settings_btn_width//2,
+            settings_btn_y,
+            settings_btn_width,
+            btn_height
+        )
+        settings_is_hovered = settings_btn.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, (60, 120, 200), settings_btn)
+        pygame.draw.rect(screen, (100, 180, 255) if settings_is_hovered else (0, 0, 0), settings_btn, 2)
+        settings_text_color = (255, 255, 255) if settings_is_hovered else (200, 200, 200)
+        settings_text = option_font.render("设置", True, settings_text_color)
+        screen.blit(settings_text, settings_text.get_rect(center=settings_btn.center))
+        
         # 返回副本选择按钮
         back_btn_width = 200  # 增加按钮宽度以容纳更长文本
-        back_btn_y = save_btn_y + btn_height + 30
+        back_btn_y = settings_btn_y + btn_height + btn_spacing
         back_btn = pygame.Rect(
             config["resolution"][0]//2 - back_btn_width//2,
             back_btn_y,
@@ -1022,15 +1041,15 @@ def draw_settings_icon():
     # 绘制齿轮齿
     for i in range(8):
         angle = i * (360 / 8)
-        radians = pygame.math.radians(angle)
+        radians = math.radians(angle)
         
         # 外点
-        outer_x = gear_center[0] + int(gear_radius * 2 * pygame.math.cos(radians))
-        outer_y = gear_center[1] + int(gear_radius * 2 * pygame.math.sin(radians))
+        outer_x = gear_center[0] + int(gear_radius * 2 * math.cos(radians))
+        outer_y = gear_center[1] + int(gear_radius * 2 * math.sin(radians))
         
         # 内点
-        inner_x = gear_center[0] + int(gear_radius * 1.2 * pygame.math.cos(radians))
-        inner_y = gear_center[1] + int(gear_radius * 1.2 * pygame.math.sin(radians))
+        inner_x = gear_center[0] + int(gear_radius * 1.2 * math.cos(radians))
+        inner_y = gear_center[1] + int(gear_radius * 1.2 * math.sin(radians))
         
         # 绘制齿轮齿
         pygame.draw.line(screen, gear_color, (inner_x, inner_y), (outer_x, outer_y), 3)
