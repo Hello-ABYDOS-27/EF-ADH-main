@@ -24,10 +24,11 @@
 
 ### 下载游戏
 
-1. **下载压缩包**：
+1. **从Releases页面下载**：
    - 访问GitHub仓库：[https://github.com/Hello-ABYDOS-27/EF-ADH-main](https://github.com/Hello-ABYDOS-27/EF-ADH-main)
-   - 点击绿色的 "Code" 按钮
-   - 选择 "Download ZIP"
+   - 找到右侧红色框标记的 "Releases" 部分
+   - 点击 "Create a new release"（如果已发布，会显示最新版本）
+   - 下载最新版本的游戏压缩包
    - 下载完成后，解压压缩包到您想要安装游戏的位置
 
 ### 运行游戏
