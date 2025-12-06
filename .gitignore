@@ -7,8 +7,8 @@ test*.py
 *_test.py
 test_*.py
 
-# 忽略所有test文件夹，但保留test/游戏所有废案
-/test/
+# 忽略test目录下的所有内容，但保留test/游戏所有废案及其内容
+/test/*
 !/test/游戏所有废案/
 !/test/游戏所有废案/**/*
 
@@ -30,3 +30,6 @@ test_*.py
 *.njsproj
 *.sln
 *.sw?
+
+# 打包输出目录
+APP/

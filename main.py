@@ -2,6 +2,18 @@ import pygame
 import sys
 import math
 import webbrowser
+import os
+
+# 资源文件路径处理
+def resource_path(relative_path):
+    """获取资源文件的绝对路径"""
+    try:
+        # PyInstaller打包后，资源文件会被放到_temp目录
+        base_path = sys._MEIPASS
+    except Exception:
+        # 开发环境中，资源文件在当前目录
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 # 初始化Pygame与音频模块
 pygame.init()
@@ -261,10 +273,10 @@ def calculate_panel_position(resolution):
 
 # 音频资源路径（修复咖啡厅BGM路径拼写错误：cafe_bgn.mp3 → cafe_bgm.mp3）
 AUDIO_PATHS = {
-    "menu": "audio/menu_bgm.mp3",        # 主界面/副本选择共用BGM
-    "hospital": "audio/hospital_bgm.mp3",# 废弃医院BGM
-    "cafe": "audio/cafe_bgm.mp3",        # 咖啡厅BGM（已修正拼写错误）
-    "open_gate": "audio/open_gate.wav"   # 开门音效
+    "menu": resource_path("audio/menu_bgm.mp3"),        # 主界面/副本选择共用BGM
+    "hospital": resource_path("audio/hospital_bgm.mp3"),# 废弃医院BGM
+    "cafe": resource_path("audio/cafe_bgm.mp3"),        # 咖啡厅BGM（已修正拼写错误）
+    "open_gate": resource_path("audio/open_gate.wav")   # 开门音效
 }
 
 # 工具函数（完全保留原有）
@@ -388,14 +400,14 @@ def play_sfx(sound_obj):
 class Player:
     def __init__(self):
         try:
-            self.idle_up = pygame.image.load("images/player_idle_up.png").convert_alpha()
-            self.idle_down = pygame.image.load("images/player_idle_down.png").convert_alpha()
-            self.idle_left = pygame.image.load("images/player_idle_left.png").convert_alpha()
-            self.idle_right = pygame.image.load("images/player_idle_right.png").convert_alpha()
-            self.walk_up = pygame.image.load("images/player_walk_up.png").convert_alpha()
-            self.walk_down = pygame.image.load("images/player_walk_down.png").convert_alpha()
-            self.walk_left = pygame.image.load("images/player_walk_left.png").convert_alpha()
-            self.walk_right = pygame.image.load("images/player_walk_right.png").convert_alpha()
+            self.idle_up = pygame.image.load(resource_path("images/player_idle_up.png")).convert_alpha()
+            self.idle_down = pygame.image.load(resource_path("images/player_idle_down.png")).convert_alpha()
+            self.idle_left = pygame.image.load(resource_path("images/player_idle_left.png")).convert_alpha()
+            self.idle_right = pygame.image.load(resource_path("images/player_idle_right.png")).convert_alpha()
+            self.walk_up = pygame.image.load(resource_path("images/player_walk_up.png")).convert_alpha()
+            self.walk_down = pygame.image.load(resource_path("images/player_walk_down.png")).convert_alpha()
+            self.walk_left = pygame.image.load(resource_path("images/player_walk_left.png")).convert_alpha()
+            self.walk_right = pygame.image.load(resource_path("images/player_walk_right.png")).convert_alpha()
         except pygame.error:
             print("⚠️  缺少玩家图片，使用默认红色方块")
             self.idle_up = create_default_image(100, 150, PLAYER_DEFAULT_COLOR)
@@ -511,7 +523,7 @@ class Player:
 # 界面绘制辅助函数（对话框+NPC初始化，NPC尺寸保持200×200像素）
 def init_npc_img():
     try:
-        npc_img = pygame.image.load("images/player_walk3.png").convert_alpha()
+        npc_img = pygame.image.load(resource_path("images/player_walk3.png")).convert_alpha()
         return pygame.transform.scale(npc_img, (200, 200))  # 匹配偏好的NPC尺寸
     except pygame.error:
         print("⚠️  缺少NPC图片，使用默认绿色方块")
@@ -1066,7 +1078,7 @@ def draw_main_menu():
     
     # 加载并绘制GitHub图标图片
     try:
-        github_image = pygame.image.load("images/github.webp")
+        github_image = pygame.image.load(resource_path("images/github.webp"))
         # 缩放图片到指定大小
         github_image = pygame.transform.scale(github_image, (github_size, github_size))
         # 绘制图片
