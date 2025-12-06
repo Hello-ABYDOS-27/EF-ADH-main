@@ -1,0 +1,68 @@
+[tool.poetry]
+name = "EF-ADH"
+version = "1.1.0"
+description = "一款基于pygame的2D冒险解谜游戏"
+authors = ["逃离学校剧本开发团队 <efadh-team@example.com>"]
+readme = "README.md"
+homepage = "https://github.com/Hello-ABYDOS-27/EF-ADH-main"
+repository = "https://github.com/Hello-ABYDOS-27/EF-ADH-main"
+keywords = ["game", "pygame", "2D", "adventure", "puzzle"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: Other/Proprietary License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Games/Entertainment",
+    "Topic :: Games/Entertainment :: Adventure Games",
+    "Topic :: Games/Entertainment :: Puzzle Games",
+]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+pygame = "^2.6.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^8.3.0"
+black = "^24.8.0"
+flake8 = "^7.1.1"
+mypy = "^1.11.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 79
+target-version = ["py38"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(\.
+    |build
+    |dist
+    |venv
+)/
+'''
+
+[tool.pytest.ini_options]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+[tool.mypy]
+python_version = "3.8"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_decorators = false
+no_implicit_optional = false
+always_true = false
+always_false = false
+strict_optional = false
+no_implicit_any = false
+type_checking_ignore_missing_imports = true
