@@ -33,3 +33,6 @@ test_*.py
 
 # 打包输出目录
 APP/
+
+# Trae IDE相关目录
+.trae/

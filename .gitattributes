@@ -1,0 +1,29 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Python files
+*.py text eol=lf
+
+# Markdown files
+*.md text eol=lf
+
+# TOML files
+*.toml text eol=lf
+
+# Text files
+*.txt text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.mp3 binary
+*.wav binary
+*.WAV binary
+
+# Configuration files
+.gitignore text eol=lf
+.editorconfig text eol=lf
+.gitattributes text eol=lf
