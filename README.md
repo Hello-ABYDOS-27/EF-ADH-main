@@ -97,6 +97,23 @@ EF-ADH-main/
 ├── requirements.txt         # 项目依赖
 ├── .gitignore              # Git忽略配置
 ├── README.md               # 项目说明文档
+├── audio/                  # 音频资源
+│   ├── cafe_bgm.mp3        # 咖啡厅背景音乐
+│   ├── hospital_bgm.mp3    # 废弃医院背景音乐
+│   ├── menu_bgm.mp3        # 主菜单背景音乐
+│   └── open_gate.WAV       # 开门音效
+├── images/                 # 图片资源
+│   ├── github.webp         # GitHub图标
+│   ├── player_idle_down.png # 玩家向下站立动画帧
+│   ├── player_idle_left.png # 玩家向左站立动画帧
+│   ├── player_idle_right.png # 玩家向右站立动画帧
+│   ├── player_idle_up.png  # 玩家向上站立动画帧
+│   ├── player_walk1.png    # 玩家行走备用动画帧1
+│   ├── player_walk3.png    # 玩家行走备用动画帧3
+│   ├── player_walk_down.png # 玩家向下行走动画帧
+│   ├── player_walk_left.png # 玩家向左行走动画帧
+│   ├── player_walk_right.png # 玩家向右行走动画帧
+│   └── player_walk_up.png  # 玩家向上行走动画帧
 ├── test/                   # 测试相关文件
 │   └── 游戏所有废案/        # 游戏开发废案历史
 ├── scenes/                 # 场景文件
@@ -105,22 +122,8 @@ EF-ADH-main/
 ├── ui/                     # UI组件
 │   ├── dialog.py           # 对话框系统
 │   └── ui_components.py    # UI组件库
-├── utils/                  # 工具函数
-│   └── collision.py        # 碰撞检测
-├── player_idle_down.png    # 玩家资源图片
-├── player_idle_left.png
-├── player_idle_right.png
-├── player_idle_up.png
-├── player_walk_down.png
-├── player_walk_left.png
-├── player_walk_right.png
-├── player_walk_up.png
-├── player_walk1.png
-├── player_walk3.png
-├── cafe_bgm.mp3            # 音频资源
-├── hospital_bgm.mp3
-├── menu_bgm.mp3
-└── open_gate.WAV
+└── utils/                  # 工具函数
+    └── collision.py        # 碰撞检测
 ```
 
 ## 文件功能说明
@@ -133,6 +136,31 @@ EF-ADH-main/
 | requirements.txt | 文本文件 | 项目依赖列表，包含游戏运行所需的所有Python库 |
 | README.md | Markdown文档 | 项目说明文档，包含项目简介、安装步骤、游戏操作等信息 |
 | .gitignore | 文本文件 | Git忽略配置，指定不需要被Git跟踪的文件和目录 |
+
+### 音频资源
+
+| 文件名 | 类型 | 功能说明 |
+|--------|------|----------|
+| audio/cafe_bgm.mp3 | 音频 | 咖啡厅场景的背景音乐 |
+| audio/hospital_bgm.mp3 | 音频 | 废弃医院场景的背景音乐 |
+| audio/menu_bgm.mp3 | 音频 | 主菜单和副本选择界面的背景音乐 |
+| audio/open_gate.WAV | 音频 | 开门音效，用于玩家打开大门时播放 |
+
+### 图片资源
+
+| 文件名 | 类型 | 功能说明 |
+|--------|------|----------|
+| images/github.webp | 图片 | GitHub图标，用于项目相关链接 |
+| images/player_idle_down.png | 图片 | 玩家向下站立的 idle 动画帧 |
+| images/player_idle_left.png | 图片 | 玩家向左站立的 idle 动画帧 |
+| images/player_idle_right.png | 图片 | 玩家向右站立的 idle 动画帧 |
+| images/player_idle_up.png | 图片 | 玩家向上站立的 idle 动画帧 |
+| images/player_walk1.png | 图片 | 玩家行走的备用动画帧1 |
+| images/player_walk3.png | 图片 | 玩家行走的备用动画帧3 |
+| images/player_walk_down.png | 图片 | 玩家向下行走的动画帧 |
+| images/player_walk_left.png | 图片 | 玩家向左行走的动画帧 |
+| images/player_walk_right.png | 图片 | 玩家向右行走的动画帧 |
+| images/player_walk_up.png | 图片 | 玩家向上行走的动画帧 |
 
 ### 场景文件
 
@@ -153,30 +181,6 @@ EF-ADH-main/
 | 文件名 | 类型 | 功能说明 |
 |--------|------|----------|
 | utils/collision.py | Python代码 | 碰撞检测工具，用于检测玩家与游戏对象之间的碰撞 |
-
-### 图片资源
-
-| 文件名 | 类型 | 功能说明 |
-|--------|------|----------|
-| player_idle_down.png | 图片 | 玩家向下站立的 idle 动画帧 |
-| player_idle_left.png | 图片 | 玩家向左站立的 idle 动画帧 |
-| player_idle_right.png | 图片 | 玩家向右站立的 idle 动画帧 |
-| player_idle_up.png | 图片 | 玩家向上站立的 idle 动画帧 |
-| player_walk_down.png | 图片 | 玩家向下行走的动画帧 |
-| player_walk_left.png | 图片 | 玩家向左行走的动画帧 |
-| player_walk_right.png | 图片 | 玩家向右行走的动画帧 |
-| player_walk_up.png | 图片 | 玩家向上行走的动画帧 |
-| player_walk1.png | 图片 | 玩家行走的备用动画帧1 |
-| player_walk3.png | 图片 | 玩家行走的备用动画帧3 |
-
-### 音频资源
-
-| 文件名 | 类型 | 功能说明 |
-|--------|------|----------|
-| cafe_bgm.mp3 | 音频 | 咖啡厅场景的背景音乐 |
-| hospital_bgm.mp3 | 音频 | 废弃医院场景的背景音乐 |
-| menu_bgm.mp3 | 音频 | 主菜单和副本选择界面的背景音乐 |
-| open_gate.WAV | 音频 | 开门音效，用于玩家打开大门时播放 |
 
 ### 测试文件
 
@@ -208,6 +212,7 @@ EF-ADH-main/
 - **v1.0.3** (2025-12-02)：优化游戏性能，修复碰撞检测问题
 - **v1.0.4** (2025-12-03)：新增游戏设置功能，支持调整分辨率和帧率
 - **v1.0.5** (2025-12-05)：修复UI显示问题，优化游戏体验
+- **v1.1.0** (2025-12-06)：优化资源文件结构，将音频和图片文件整理到专门目录
 
 ## 游戏开发废案历史
 
