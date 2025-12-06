@@ -1,6 +1,7 @@
 import pygame
 import sys
 import math
+import webbrowser
 
 # 初始化Pygame与音频模块
 pygame.init()
@@ -48,19 +49,26 @@ SLIDER_FILL_COLOR = (180, 180, 0) # 新增：滑杆填充色
 SLIDER_THUMB_COLOR = (255, 255, 255) # 新增：滑杆滑块色
 SLIDER_THUMB_HOVER_COLOR = (255, 100, 100) # 新增：滑块悬停色
 
-# 字体设置（完全保留原有）
-try:
-    menu_font = pygame.font.SysFont("SimHei", 48)
-    option_font = pygame.font.SysFont("SimHei", 36)
-    small_font = pygame.font.SysFont("SimHei", 28)
-    dialog_font = pygame.font.SysFont("SimHei", 24)
-    pause_font = pygame.font.SysFont("SimHei", 72)
-except:
-    menu_font = pygame.font.SysFont(None, 48)
-    option_font = pygame.font.SysFont(None, 36)
-    small_font = pygame.font.SysFont(None, 28)
-    dialog_font = pygame.font.SysFont(None, 24)
-    pause_font = pygame.font.SysFont(None, 72)
+# 字体设置（根据窗口大小动态调整）
+def update_fonts(resolution):
+    """根据当前分辨率动态调整字体大小"""
+    global menu_font, option_font, small_font, dialog_font, pause_font
+    
+    # 字体大小根据屏幕宽度动态调整
+    base_size = min(resolution[0], resolution[1])
+    
+    try:
+        menu_font = pygame.font.SysFont("SimHei", int(base_size * 0.06))
+        option_font = pygame.font.SysFont("SimHei", int(base_size * 0.045))
+        small_font = pygame.font.SysFont("SimHei", int(base_size * 0.035))
+        dialog_font = pygame.font.SysFont("SimHei", int(base_size * 0.03))
+        pause_font = pygame.font.SysFont("SimHei", int(base_size * 0.09))
+    except:
+        menu_font = pygame.font.SysFont(None, int(base_size * 0.06))
+        option_font = pygame.font.SysFont(None, int(base_size * 0.045))
+        small_font = pygame.font.SysFont(None, int(base_size * 0.035))
+        dialog_font = pygame.font.SysFont(None, int(base_size * 0.03))
+        pause_font = pygame.font.SysFont(None, int(base_size * 0.09))
 
 # 游戏状态枚举（完全保留原有）
 class GameState:
@@ -72,9 +80,11 @@ class GameState:
     GAME_INFO = 5
     DIALOG = 6
     QUIT_CONFIRM = 7
+    GAME_SETTINGS = 8  # 游戏中显示的设置框
 
 # 全局状态变量（保留原有，新增滑杆交互变量，初始化settings_scroll_y和按键状态）
 current_state = GameState.MAIN_MENU
+prev_game_state = None  # 记录进入设置前的游戏状态
 is_paused = False
 show_back_btn = False
 gate_is_open = False
@@ -214,6 +224,9 @@ config = {
 }
 shortcut_items = [("上移", "move_up"), ("下移", "move_down"), ("左移", "move_left"), ("右移", "move_right"), ("开门", "open_gate")]
 
+# 初始化字体
+update_fonts(config["resolution"])
+
 # 面板位置计算的公共函数，确保draw_settings和handle_events使用相同的逻辑
 def calculate_panel_position(resolution):
     """计算设置面板的位置和尺寸，确保UI元素坐标计算一致
@@ -224,18 +237,34 @@ def calculate_panel_position(resolution):
     Returns:
         tuple: (panel_x, panel_y, panel_width, panel_height)
     """
-    panel_width = 850  # 增大宽度，从650变为850（增加200像素，实现往左延伸）
-    panel_height = resolution[1] - 150  # 保持高度不变
-    panel_x = resolution[0] - panel_width - 50  # 保持距离右边50像素不变，实现往左延伸
-    panel_y = 100  # 保持Y位置不变
+    # 主菜单位置和尺寸，确保设置面板不会覆盖主菜单
+    main_menu_x = 150
+    main_menu_width = 250
+    main_menu_right = main_menu_x + main_menu_width
+    
+    # 确保设置面板与主菜单之间有至少50像素的间距
+    min_panel_x = main_menu_right + 50
+    
+    # 根据当前分辨率动态计算面板宽度，确保在不同分辨率下都合适
+    # 面板最大宽度 = 屏幕宽度 - 右边距(50) - 最小x坐标(min_panel_x)
+    max_possible_width = resolution[0] - 50 - min_panel_x
+    # 面板宽度占屏幕宽度的比例，范围在300-800之间，同时不超过最大可能宽度
+    panel_width = min(max(int(resolution[0] * 0.5), 300), 800, max_possible_width)
+    # 面板高度占屏幕高度的比例，范围在400-800之间
+    panel_height = min(max(int(resolution[1] * 0.7), 400), 800)
+    # 计算面板x坐标，确保不会覆盖主菜单
+    panel_x = resolution[0] - panel_width - 50
+    panel_x = max(panel_x, min_panel_x)
+    # 保持Y位置不变，距离顶部100像素
+    panel_y = 100
     return panel_x, panel_y, panel_width, panel_height
 
 # 音频资源路径（修复咖啡厅BGM路径拼写错误：cafe_bgn.mp3 → cafe_bgm.mp3）
 AUDIO_PATHS = {
-    "menu": "menu_bgm.mp3",        # 主界面/副本选择共用BGM
-    "hospital": "hospital_bgm.mp3",# 废弃医院BGM
-    "cafe": "cafe_bgm.mp3",        # 咖啡厅BGM（已修正拼写错误）
-    "open_gate": "open_gate.wav"   # 开门音效
+    "menu": "audio/menu_bgm.mp3",        # 主界面/副本选择共用BGM
+    "hospital": "audio/hospital_bgm.mp3",# 废弃医院BGM
+    "cafe": "audio/cafe_bgm.mp3",        # 咖啡厅BGM（已修正拼写错误）
+    "open_gate": "audio/open_gate.wav"   # 开门音效
 }
 
 # 工具函数（完全保留原有）
@@ -359,14 +388,14 @@ def play_sfx(sound_obj):
 class Player:
     def __init__(self):
         try:
-            self.idle_up = pygame.image.load("player_idle_up.png").convert_alpha()
-            self.idle_down = pygame.image.load("player_idle_down.png").convert_alpha()
-            self.idle_left = pygame.image.load("player_idle_left.png").convert_alpha()
-            self.idle_right = pygame.image.load("player_idle_right.png").convert_alpha()
-            self.walk_up = pygame.image.load("player_walk_up.png").convert_alpha()
-            self.walk_down = pygame.image.load("player_walk_down.png").convert_alpha()
-            self.walk_left = pygame.image.load("player_walk_left.png").convert_alpha()
-            self.walk_right = pygame.image.load("player_walk_right.png").convert_alpha()
+            self.idle_up = pygame.image.load("images/player_idle_up.png").convert_alpha()
+            self.idle_down = pygame.image.load("images/player_idle_down.png").convert_alpha()
+            self.idle_left = pygame.image.load("images/player_idle_left.png").convert_alpha()
+            self.idle_right = pygame.image.load("images/player_idle_right.png").convert_alpha()
+            self.walk_up = pygame.image.load("images/player_walk_up.png").convert_alpha()
+            self.walk_down = pygame.image.load("images/player_walk_down.png").convert_alpha()
+            self.walk_left = pygame.image.load("images/player_walk_left.png").convert_alpha()
+            self.walk_right = pygame.image.load("images/player_walk_right.png").convert_alpha()
         except pygame.error:
             print("⚠️  缺少玩家图片，使用默认红色方块")
             self.idle_up = create_default_image(100, 150, PLAYER_DEFAULT_COLOR)
@@ -482,7 +511,7 @@ class Player:
 # 界面绘制辅助函数（对话框+NPC初始化，NPC尺寸保持200×200像素）
 def init_npc_img():
     try:
-        npc_img = pygame.image.load("player_walk3.png").convert_alpha()
+        npc_img = pygame.image.load("images/player_walk3.png").convert_alpha()
         return pygame.transform.scale(npc_img, (200, 200))  # 匹配偏好的NPC尺寸
     except pygame.error:
         print("⚠️  缺少NPC图片，使用默认绿色方块")
@@ -709,11 +738,14 @@ def draw_hospital():
         screen.blit(shadow_text, (pause_text_rect.x + 5, pause_text_rect.y + 5))
         screen.blit(pause_text, pause_text_rect)
 
-        btn_height = 50
-        btn_spacing = 30
+        # 根据窗口大小动态调整按钮和文本大小
+        base_size = min(config["resolution"][0], config["resolution"][1])
+        
+        btn_height = int(base_size * 0.06)  # 按钮高度占屏幕最小边的6%
+        btn_spacing = int(base_size * 0.04)  # 按钮间距占屏幕最小边的4%
         
         # 存档按钮
-        save_btn_width = 150
+        save_btn_width = int(base_size * 0.15)  # 按钮宽度占屏幕最小边的15%
         save_btn_y = (config["resolution"][1] // 2) - 100
         save_btn = pygame.Rect(
             config["resolution"][0]//2 - save_btn_width//2,
@@ -729,7 +761,7 @@ def draw_hospital():
         screen.blit(save_text, save_text.get_rect(center=save_btn.center))
         
         # 设置按钮
-        settings_btn_width = 150
+        settings_btn_width = int(base_size * 0.15)  # 按钮宽度占屏幕最小边的15%
         settings_btn_y = save_btn_y + btn_height + btn_spacing
         settings_btn = pygame.Rect(
             config["resolution"][0]//2 - settings_btn_width//2,
@@ -745,7 +777,7 @@ def draw_hospital():
         screen.blit(settings_text, settings_text.get_rect(center=settings_btn.center))
         
         # 返回副本选择按钮
-        back_btn_width = 200  # 增加按钮宽度以容纳更长文本
+        back_btn_width = int(base_size * 0.2)  # 按钮宽度占屏幕最小边的20%
         back_btn_y = settings_btn_y + btn_height + btn_spacing
         back_btn = pygame.Rect(
             config["resolution"][0]//2 - back_btn_width//2,
@@ -895,11 +927,14 @@ def draw_cafe():
         screen.blit(shadow_text, (pause_text_rect.x + 5, pause_text_rect.y + 5))
         screen.blit(pause_text, pause_text_rect)
 
-        btn_height = 50
-        btn_spacing = 30
+        # 根据窗口大小动态调整按钮和文本大小
+        base_size = min(config["resolution"][0], config["resolution"][1])
+        
+        btn_height = int(base_size * 0.06)  # 按钮高度占屏幕最小边的6%
+        btn_spacing = int(base_size * 0.04)  # 按钮间距占屏幕最小边的4%
         
         # 存档按钮
-        save_btn_width = 150
+        save_btn_width = int(base_size * 0.15)  # 按钮宽度占屏幕最小边的15%
         save_btn_y = (config["resolution"][1] // 2) - 100
         save_btn = pygame.Rect(
             config["resolution"][0]//2 - save_btn_width//2,
@@ -915,7 +950,7 @@ def draw_cafe():
         screen.blit(save_text, save_text.get_rect(center=save_btn.center))
         
         # 设置按钮
-        settings_btn_width = 150
+        settings_btn_width = int(base_size * 0.15)  # 按钮宽度占屏幕最小边的15%
         settings_btn_y = save_btn_y + btn_height + btn_spacing
         settings_btn = pygame.Rect(
             config["resolution"][0]//2 - settings_btn_width//2,
@@ -931,7 +966,7 @@ def draw_cafe():
         screen.blit(settings_text, settings_text.get_rect(center=settings_btn.center))
         
         # 返回副本选择按钮
-        back_btn_width = 200  # 增加按钮宽度以容纳更长文本
+        back_btn_width = int(base_size * 0.2)  # 按钮宽度占屏幕最小边的20%
         back_btn_y = settings_btn_y + btn_height + btn_spacing
         back_btn = pygame.Rect(
             config["resolution"][0]//2 - back_btn_width//2,
@@ -952,8 +987,12 @@ def draw_cafe():
 # 主菜单绘制（含BGM播放）
 def draw_main_menu():
     screen.fill(BG_COLOR)
-    menu_width = 250
-    menu_height = 320
+    
+    # 根据窗口大小动态调整菜单和按钮大小
+    base_size = min(config["resolution"][0], config["resolution"][1])
+    
+    menu_width = int(base_size * 0.25)  # 菜单宽度占屏幕最小边的25%
+    menu_height = int(base_size * 0.35)  # 菜单高度占屏幕最小边的35%
     menu_x = 150
     menu_y = (config["resolution"][1] - menu_height) // 2
 
@@ -961,7 +1000,6 @@ def draw_main_menu():
     pygame.draw.rect(screen, BUTTON_COLOR, (menu_x, menu_y, menu_width, menu_height), 2)
 
     # 绘制标题，确保不超出菜单宽度
-    # 使用更小的字体渲染标题，避免超出菜单宽度
     title_text = option_font.render("逃离学校剧本", True, TEXT_COLOR)
     # 计算标题位置，确保居中且不超出菜单
     title_x = menu_x + (menu_width - title_text.get_width()) // 2
@@ -969,9 +1007,9 @@ def draw_main_menu():
     screen.blit(title_text, (title_x, title_y))
 
     btn_width = menu_width - 20
-    btn_height = 45
-    button_y_offset = 80
-    button_spacing = 55
+    btn_height = int(base_size * 0.05)  # 按钮高度占屏幕最小边的5%
+    button_y_offset = int(base_size * 0.08)  # 按钮起始位置偏移
+    button_spacing = int(base_size * 0.06)  # 按钮间距
 
     # 开始游戏按钮
     start_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset, btn_width, btn_height)
@@ -1018,71 +1056,243 @@ def draw_main_menu():
     # 播放菜单BGM
     if current_bgm != "menu":
         play_bgm("menu")
+    
+    # 绘制GitHub图标和链接
+    github_size = 40
+    github_x = 20
+    github_y = config["resolution"][1] - github_size - 20
+    
+    github_rect = pygame.Rect(github_x, github_y, github_size, github_size)
+    
+    # 加载并绘制GitHub图标图片
+    try:
+        github_image = pygame.image.load("images/github.webp")
+        # 缩放图片到指定大小
+        github_image = pygame.transform.scale(github_image, (github_size, github_size))
+        # 绘制图片
+        screen.blit(github_image, github_rect)
+    except Exception as e:
+        # 如果图片加载失败，使用简单的后备绘制
+        pygame.draw.rect(screen, (36, 41, 46), github_rect, border_radius=5)
+        pygame.draw.rect(screen, (255, 255, 255), github_rect, 2, border_radius=5)
+        github_text = small_font.render("GitHub", True, (255, 255, 255))
+        github_text_rect = github_text.get_rect(center=github_rect.center)
+        screen.blit(github_text, github_text_rect)
 
-    return start_btn, setting_btn, info_btn, quit_btn
+    return start_btn, setting_btn, info_btn, quit_btn, github_rect
 
-# 设置图标绘制函数
-def draw_settings_icon():
-    """绘制左下角的设置图标
+# 游戏中的设置框绘制函数
+def draw_game_settings():
+    """绘制游戏中的设置框，显示在画面中间
     
     Returns:
-        pygame.Rect: 设置图标的碰撞矩形
+        list: 设置框中可交互元素的列表
     """
-    icon_size = 50
-    icon_margin = 20
+    global settings_scroll_y, config  # 声明所有需要的全局变量
     
-    # 图标位置：左下角
-    icon_x = icon_margin
-    icon_y = config["resolution"][1] - icon_size - icon_margin
+    # 主菜单位置和尺寸，确保设置面板不会覆盖主菜单
+    main_menu_x = 150
+    main_menu_width = 250
+    main_menu_right = main_menu_x + main_menu_width
     
-    # 创建图标矩形
-    icon_rect = pygame.Rect(icon_x, icon_y, icon_size, icon_size)
+    # 确保设置面板与主菜单之间有至少50像素的间距
+    min_settings_x = main_menu_right + 50
     
-    # 检查鼠标是否悬停
+    # 根据当前分辨率动态计算设置框尺寸，确保在不同分辨率下都合适
+    # 面板最大宽度 = 屏幕宽度 - 最小x坐标(min_settings_x) * 2 (左右各留空间)
+    max_possible_width = config["resolution"][0] - 100 - min_settings_x
+    # 设置框宽度占屏幕宽度的比例，范围在400-800之间，同时不超过最大可能宽度
+    settings_width = min(max(int(config["resolution"][0] * 0.5), 400), 800, max_possible_width)
+    # 设置框高度占屏幕高度的比例，范围在400-700之间
+    settings_height = min(max(int(config["resolution"][1] * 0.7), 400), 700)
+    
+    # 设置框位置：尽量居中，但确保不会覆盖主菜单
+    settings_x = (config["resolution"][0] - settings_width) // 2
+    # 确保设置框的左边缘不会超过主菜单的右边缘+50像素
+    settings_x = max(settings_x, min_settings_x)
+    settings_y = (config["resolution"][1] - settings_height) // 2
+    
+    # 绘制半透明背景遮罩
+    mask_surface = pygame.Surface(config["resolution"], pygame.SRCALPHA)
+    pygame.draw.rect(mask_surface, (0, 0, 0, 150), (0, 0, config["resolution"][0], config["resolution"][1]))
+    screen.blit(mask_surface, (0, 0))
+    
+    # 绘制设置框背景
+    pygame.draw.rect(screen, MENU_BG, (settings_x, settings_y, settings_width, settings_height), border_radius=10)
+    pygame.draw.rect(screen, BUTTON_COLOR, (settings_x, settings_y, settings_width, settings_height), 2, border_radius=10)
+    
+    # 绘制标题
+    title_text = menu_font.render("游戏设置", True, TEXT_COLOR)
+    title_rect = title_text.get_rect(center=(settings_x + settings_width//2, settings_y + 30))
+    screen.blit(title_text, title_rect)
+    
+    # 绘制关闭按钮
+    close_btn_width = 30
+    close_btn_height = 30
+    close_btn_x = settings_x + settings_width - close_btn_width - 10
+    close_btn_y = settings_y + 10
+    close_btn = pygame.Rect(close_btn_x, close_btn_y, close_btn_width, close_btn_height)
+    
+    # 检查鼠标是否悬停在关闭按钮上
     mouse_pos = pygame.mouse.get_pos()
-    is_hovered = icon_rect.collidepoint(mouse_pos)
+    close_is_hovered = close_btn.collidepoint(mouse_pos)
     
-    # 绘制图标背景
-    if is_hovered:
-        pygame.draw.rect(screen, BUTTON_HOVER, icon_rect, border_radius=10)
+    # 绘制关闭按钮
+    if close_is_hovered:
+        pygame.draw.rect(screen, (200, 60, 60), close_btn, border_radius=5)
     else:
-        pygame.draw.rect(screen, BUTTON_COLOR, icon_rect, border_radius=10)
+        pygame.draw.rect(screen, BUTTON_COLOR, close_btn, border_radius=5)
     
-    # 绘制设置图标（齿轮形状）
-    gear_color = TEXT_COLOR
-    gear_radius = icon_size // 4
-    gear_center = (icon_x + icon_size // 2, icon_y + icon_size // 2)
+    # 绘制关闭按钮文字
+    close_text = option_font.render("×", True, TEXT_COLOR)
+    close_text_rect = close_text.get_rect(center=close_btn.center)
+    screen.blit(close_text, close_text_rect)
     
-    # 绘制齿轮中心
-    pygame.draw.circle(screen, gear_color, gear_center, gear_radius, 2)
+    # 滚动容器（所有设置项绘制在滚动表面上）
+    scroll_surface = pygame.Surface((settings_width - 40, 1000), pygame.SRCALPHA)
+    base_y = 0 + settings_scroll_y
     
-    # 绘制齿轮齿
-    for i in range(8):
-        angle = i * (360 / 8)
-        radians = math.radians(angle)
-        
-        # 外点
-        outer_x = gear_center[0] + int(gear_radius * 2 * math.cos(radians))
-        outer_y = gear_center[1] + int(gear_radius * 2 * math.sin(radians))
-        
-        # 内点
-        inner_x = gear_center[0] + int(gear_radius * 1.2 * math.cos(radians))
-        inner_y = gear_center[1] + int(gear_radius * 1.2 * math.sin(radians))
-        
-        # 绘制齿轮齿
-        pygame.draw.line(screen, gear_color, (inner_x, inner_y), (outer_x, outer_y), 3)
+    # 分辨率设置
+    res_title = option_font.render("分辨率设置", True, TEXT_COLOR)
+    scroll_surface.blit(res_title, (0, base_y))
+    res_y = base_y + 40
+    res_spacing = 30
     
-    # 绘制设置文字
-    settings_text = small_font.render("设置", True, TEXT_COLOR)
-    text_x = icon_x + (icon_size - settings_text.get_width()) // 2
-    text_y = icon_y + icon_size + 5
-    screen.blit(settings_text, (text_x, text_y))
+    # 添加自定义分辨率显示
+    custom_res_text = f"自定义: {config['resolution'][0]} × {config['resolution'][1]}"
+    custom_res_rect = pygame.Rect(0, res_y, 300, 30)
+    if current_res_idx == -1:
+        pygame.draw.rect(scroll_surface, SELECTED_COLOR, custom_res_rect, border_radius=3)
+    else:
+        pygame.draw.rect(scroll_surface, BUTTON_COLOR, custom_res_rect, border_radius=3)
+    custom_res_surf = small_font.render(custom_res_text, True, TEXT_COLOR)
+    scroll_surface.blit(custom_res_surf, custom_res_surf.get_rect(center=custom_res_rect.center))
     
-    return icon_rect
+    # 绘制预设分辨率列表
+    for i, (w, h) in enumerate(RESOLUTION_OPTIONS):
+        res_text = f"{w} × {h}"
+        res_rect = pygame.Rect(0, res_y + (i + 1) * res_spacing, 200, 30)
+        if i == current_res_idx:
+            pygame.draw.rect(scroll_surface, SELECTED_COLOR, res_rect, border_radius=3)
+        else:
+            pygame.draw.rect(scroll_surface, BUTTON_COLOR, res_rect, border_radius=3)
+        res_surf = small_font.render(res_text, True, TEXT_COLOR)
+        scroll_surface.blit(res_surf, res_surf.get_rect(center=res_rect.center))
+    
+    # 帧率设置
+    fps_title = option_font.render("帧率设置", True, TEXT_COLOR)
+    fps_y = res_y + (len(RESOLUTION_OPTIONS) + 1) * res_spacing + 60
+    scroll_surface.blit(fps_title, (0, fps_y))
+    # 添加刷新率提示文字
+    fps_hint = small_font.render("(刷新率最高以显示器为准)", True, (150, 150, 150))
+    scroll_surface.blit(fps_hint, (0, fps_y + 30))
+    fps_option_y = fps_y + 60
+    for i, fps in enumerate(FPS_OPTIONS):
+        fps_rect = pygame.Rect(0, fps_option_y + i * res_spacing, 100, 30)
+        if i == current_fps_idx:
+            pygame.draw.rect(scroll_surface, SELECTED_COLOR, fps_rect, border_radius=3)
+        else:
+            pygame.draw.rect(scroll_surface, BUTTON_COLOR, fps_rect, border_radius=3)
+        fps_surf = small_font.render(f"{fps} FPS", True, TEXT_COLOR)
+        scroll_surface.blit(fps_surf, fps_surf.get_rect(center=fps_rect.center))
+    
+    # 音量设置（BGM）
+    volume_title = option_font.render("音量设置", True, TEXT_COLOR)
+    volume_y = fps_option_y + len(FPS_OPTIONS) * res_spacing + 60
+    scroll_surface.blit(volume_title, (0, volume_y))
+    
+    # BGM音量
+    bgm_label = small_font.render(f"BGM音量: {int(bgm_volume * 100)}%", True, TEXT_COLOR)
+    scroll_surface.blit(bgm_label, (0, volume_y + 40))
+    bgm_slider_rect = pygame.Rect(0, volume_y + 70, 300, 8)
+    pygame.draw.rect(scroll_surface, SLIDER_BG_COLOR, bgm_slider_rect, border_radius=4)
+    bgm_fill_width = bgm_slider_rect.width * bgm_volume
+    pygame.draw.rect(scroll_surface, SLIDER_FILL_COLOR, (0, volume_y + 70, bgm_fill_width, 8), border_radius=4)
+    bgm_thumb_radius = 12
+    bgm_thumb_x = bgm_fill_width - bgm_thumb_radius
+    bgm_thumb_y = volume_y + 70 + 4 - bgm_thumb_radius
+    pygame.draw.circle(scroll_surface, SLIDER_THUMB_COLOR, (bgm_thumb_x + bgm_thumb_radius, bgm_thumb_y + bgm_thumb_radius), bgm_thumb_radius)
+    
+    # 音效音量
+    sfx_label = small_font.render(f"音效音量: {int(sfx_volume * 100)}%", True, TEXT_COLOR)
+    scroll_surface.blit(sfx_label, (0, volume_y + 120))
+    sfx_slider_rect = pygame.Rect(0, volume_y + 150, 300, 8)
+    pygame.draw.rect(scroll_surface, SLIDER_BG_COLOR, sfx_slider_rect, border_radius=4)
+    sfx_fill_width = sfx_slider_rect.width * sfx_volume
+    pygame.draw.rect(scroll_surface, SLIDER_FILL_COLOR, (0, volume_y + 150, sfx_fill_width, 8), border_radius=4)
+    sfx_thumb_x = sfx_fill_width - bgm_thumb_radius
+    sfx_thumb_y = volume_y + 150 + 4 - bgm_thumb_radius
+    pygame.draw.circle(scroll_surface, SLIDER_THUMB_COLOR, (sfx_thumb_x + bgm_thumb_radius, sfx_thumb_y + bgm_thumb_radius), bgm_thumb_radius)
+    
+    # 计算滚动范围
+    total_content_height = volume_y + 200
+    max_scroll_y = max(0, total_content_height - (settings_height - 80))
+    settings_scroll_y = max(-max_scroll_y, min(0, settings_scroll_y))
+    
+    # 绘制滚动内容
+    screen.blit(scroll_surface, (settings_x + 20, settings_y + 60), area=(0, -settings_scroll_y, settings_width - 40, settings_height - 80))
+    
+    # 绘制滚动条
+    if max_scroll_y > 0:
+        scrollbar_width = 6
+        scrollbar_height = (settings_height - 80) / total_content_height * (settings_height - 80)
+        scrollbar_y = settings_y + 60 + (-settings_scroll_y / max_scroll_y) * (settings_height - 80 - scrollbar_height)
+        pygame.draw.rect(screen, BUTTON_HOVER, (settings_x + settings_width - 30, scrollbar_y, scrollbar_width, scrollbar_height), border_radius=3)
+    
+    # 重建设置项的屏幕坐标Rect
+    interactive_elements = []
+    
+    # 关闭按钮
+    interactive_elements.append(("close", close_btn))
+    
+    # 分辨率选项
+    res_rects = []
+    # 先添加自定义分辨率的Rect
+    custom_res_rect = pygame.Rect(settings_x + 20, settings_y + 60 + res_y - settings_scroll_y, 300, 30)
+    res_rects.append((custom_res_rect, -1))
+    # 再添加预设分辨率的Rect，注意Y坐标要加1个res_spacing
+    for i, (w, h) in enumerate(RESOLUTION_OPTIONS):
+        res_rect = pygame.Rect(settings_x + 20, settings_y + 60 + res_y + (i + 1) * res_spacing - settings_scroll_y, 200, 30)
+        res_rects.append((res_rect, i))
+    interactive_elements.append(("resolution", res_rects))
+    
+    # 帧率选项
+    fps_rects = []
+    for i, fps in enumerate(FPS_OPTIONS):
+        fps_rect = pygame.Rect(settings_x + 20, settings_y + 60 + fps_option_y + i * res_spacing - settings_scroll_y, 100, 30)
+        fps_rects.append((fps_rect, i))
+    interactive_elements.append(("fps", fps_rects))
+    
+    # BGM音量滑杆
+    bgm_slider_screen_rect = pygame.Rect(settings_x + 20, settings_y + 60 + volume_y + 70 - settings_scroll_y, 300, 8)
+    bgm_thumb_screen_rect = pygame.Rect(
+        settings_x + 20 + bgm_thumb_x, 
+        settings_y + 60 + bgm_thumb_y - settings_scroll_y, 
+        bgm_thumb_radius * 2, 
+        bgm_thumb_radius * 2
+    )
+    interactive_elements.append(("bgm_slider", bgm_slider_screen_rect))
+    interactive_elements.append(("bgm_thumb", bgm_thumb_screen_rect))
+    
+    # 音效音量滑杆
+    sfx_slider_screen_rect = pygame.Rect(settings_x + 20, settings_y + 60 + volume_y + 150 - settings_scroll_y, 300, 8)
+    sfx_thumb_screen_rect = pygame.Rect(
+        settings_x + 20 + sfx_thumb_x, 
+        settings_y + 60 + sfx_thumb_y - settings_scroll_y, 
+        bgm_thumb_radius * 2, 
+        bgm_thumb_radius * 2
+    )
+    interactive_elements.append(("sfx_slider", sfx_slider_screen_rect))
+    interactive_elements.append(("sfx_thumb", sfx_thumb_screen_rect))
+    
+    return interactive_elements
 
 # 副本选择界面绘制（含BGM播放）
 def draw_copy_select():
     # 只绘制内容区域，不绘制主菜单（主菜单由draw_animation或main函数单独绘制）
+    
+    # 根据窗口大小动态调整按钮和文本大小
+    base_size = min(config["resolution"][0], config["resolution"][1])
     
     title_text = menu_font.render("选择副本场景", True, TEXT_COLOR)
     title_rect = title_text.get_rect(center=(config["resolution"][0]//2, 80))
@@ -1092,11 +1302,15 @@ def draw_copy_select():
     screen.blit(title_bg, (title_rect.x - 20, title_rect.y - 10))
     screen.blit(title_text, title_rect)
 
-    option_width = 220
-    option_height = 120
-    spacing = 60
-    # 右侧计算，将副本选择按钮放在右侧，增加边距
-    start_x = config["resolution"][0] - (3 * option_width + 2 * spacing) - 100
+    # 动态计算按钮大小
+    option_width = int(base_size * 0.2)  # 按钮宽度占屏幕最小边的20%
+    option_height = int(base_size * 0.12)  # 按钮高度占屏幕最小边的12%
+    spacing = int(base_size * 0.06)  # 按钮间距占屏幕最小边的6%
+    # 左侧计算，将副本选择按钮放在左侧，更靠近主菜单
+    main_menu_width = 250
+    main_menu_x = 150
+    # 按钮起始位置距离主菜单右侧50像素
+    start_x = main_menu_x + main_menu_width + 50
     start_y = (config["resolution"][1] - option_height) // 2 + 20
 
     hospital_btn = pygame.Rect(start_x, start_y, option_width, option_height)
@@ -1349,6 +1563,9 @@ def draw_content_to_surface(state, surface):
     
     # 绘制指定状态的内容区域
     if state == GameState.COPY_SELECT:
+        # 根据窗口大小动态调整按钮和文本大小
+        base_size = min(config["resolution"][0], config["resolution"][1])
+        
         title_text = menu_font.render("选择副本场景", True, TEXT_COLOR)
         title_rect = title_text.get_rect(center=(config["resolution"][0]//2, 80))
         # 绘制半透明背景，增强标题可读性
@@ -1357,11 +1574,15 @@ def draw_content_to_surface(state, surface):
         screen.blit(title_bg, (title_rect.x - 20, title_rect.y - 10))
         screen.blit(title_text, title_rect)
         
-        option_width = 220
-        option_height = 120
-        spacing = 60
-        # 右侧计算，将副本选择按钮放在右侧，增加边距
-        start_x = config["resolution"][0] - (3 * option_width + 2 * spacing) - 100
+        # 动态计算按钮大小
+        option_width = int(base_size * 0.2)  # 按钮宽度占屏幕最小边的20%
+        option_height = int(base_size * 0.12)  # 按钮高度占屏幕最小边的12%
+        spacing = int(base_size * 0.06)  # 按钮间距占屏幕最小边的6%
+        # 左侧计算，将副本选择按钮放在左侧，更靠近主菜单
+        main_menu_width = 250
+        main_menu_x = 150
+        # 按钮起始位置距离主菜单右侧50像素
+        start_x = main_menu_x + main_menu_width + 50
         start_y = (config["resolution"][1] - option_height) // 2 + 20
         
         hospital_btn = pygame.Rect(start_x, start_y, option_width, option_height)
@@ -1413,9 +1634,21 @@ def draw_content_to_surface(state, surface):
         scroll_surface.blit(res_title, (0, base_y))
         res_y = base_y + 40
         res_spacing = 30
+        
+        # 添加自定义分辨率显示
+        custom_res_text = f"自定义: {config['resolution'][0]} × {config['resolution'][1]}"
+        custom_res_rect = pygame.Rect(0, res_y, 300, 30)
+        if current_res_idx == -1:
+            pygame.draw.rect(scroll_surface, SELECTED_COLOR, custom_res_rect, border_radius=3)
+        else:
+            pygame.draw.rect(scroll_surface, BUTTON_COLOR, custom_res_rect, border_radius=3)
+        custom_res_surf = small_font.render(custom_res_text, True, TEXT_COLOR)
+        scroll_surface.blit(custom_res_surf, custom_res_surf.get_rect(center=custom_res_rect.center))
+        
+        # 绘制预设分辨率列表
         for i, (w, h) in enumerate(RESOLUTION_OPTIONS):
             res_text = f"{w} × {h}"
-            res_rect = pygame.Rect(0, res_y + i * res_spacing, 200, 30)
+            res_rect = pygame.Rect(0, res_y + (i + 1) * res_spacing, 200, 30)
             if i == current_res_idx:
                 pygame.draw.rect(scroll_surface, SELECTED_COLOR, res_rect, border_radius=3)
             else:
@@ -1425,7 +1658,7 @@ def draw_content_to_surface(state, surface):
         
         # 帧率设置
         fps_title = option_font.render("帧率设置", True, TEXT_COLOR)
-        fps_y = res_y + len(RESOLUTION_OPTIONS) * res_spacing + 60
+        fps_y = res_y + (len(RESOLUTION_OPTIONS) + 1) * res_spacing + 60
         scroll_surface.blit(fps_title, (0, fps_y))
         # 添加刷新率提示文字
         fps_hint = small_font.render("(刷新率最高以显示器为准)", True, (150, 150, 150))
@@ -1891,7 +2124,7 @@ def draw_quit_confirm():
 
 # 设置界面绘制（修复settings_scroll_y未定义：显式声明全局变量在函数开头）
 def draw_settings():
-    global screen, settings_scroll_y  # 关键修复：在函数开头声明global，避免UnboundLocalError
+    global screen, settings_scroll_y, config  # 关键修复：在函数开头声明global，避免UnboundLocalError
     # 只绘制内容区域，不绘制主菜单（主菜单由draw_animation或main函数单独绘制）
     # 使用公共函数计算面板位置，确保与handle_events一致
     panel_x, panel_y, panel_width, panel_height = calculate_panel_position(config["resolution"])
@@ -1917,9 +2150,21 @@ def draw_settings():
     scroll_surface.blit(res_title, (0, base_y))
     res_y = base_y + 40
     res_spacing = 30
+    
+    # 添加自定义分辨率显示
+    custom_res_text = f"自定义: {config['resolution'][0]} × {config['resolution'][1]}"
+    custom_res_rect = pygame.Rect(0, res_y, 300, 30)
+    if current_res_idx == -1:
+        pygame.draw.rect(scroll_surface, SELECTED_COLOR, custom_res_rect, border_radius=3)
+    else:
+        pygame.draw.rect(scroll_surface, BUTTON_COLOR, custom_res_rect, border_radius=3)
+    custom_res_surf = small_font.render(custom_res_text, True, TEXT_COLOR)
+    scroll_surface.blit(custom_res_surf, custom_res_surf.get_rect(center=custom_res_rect.center))
+    
+    # 绘制预设分辨率列表
     for i, (w, h) in enumerate(RESOLUTION_OPTIONS):
         res_text = f"{w} × {h}"
-        res_rect = pygame.Rect(0, res_y + i * res_spacing, 200, 30)
+        res_rect = pygame.Rect(0, res_y + (i + 1) * res_spacing, 200, 30)
         if i == current_res_idx:
             pygame.draw.rect(scroll_surface, SELECTED_COLOR, res_rect, border_radius=3)
         else:
@@ -1929,7 +2174,7 @@ def draw_settings():
 
     # 帧率设置
     fps_title = option_font.render("帧率设置", True, TEXT_COLOR)
-    fps_y = res_y + len(RESOLUTION_OPTIONS) * res_spacing + 60
+    fps_y = res_y + (len(RESOLUTION_OPTIONS) + 1) * res_spacing + 60
     scroll_surface.blit(fps_title, (0, fps_y))
     # 添加刷新率提示文字
     fps_hint = small_font.render("(刷新率最高以显示器为准)", True, (150, 150, 150))
@@ -2042,8 +2287,12 @@ def draw_settings():
     # 返回所有可交互元素的Rect（用于事件处理）
     # 重建设置项的屏幕坐标Rect（用于事件判断）
     res_rects = []
+    # 先添加自定义分辨率的Rect
+    custom_res_rect = pygame.Rect(panel_x + 20, panel_y + 20 + res_y + settings_scroll_y, 300, 30)
+    res_rects.append((custom_res_rect, -1))
+    # 再添加预设分辨率的Rect，注意Y坐标要加1个res_spacing
     for i, (w, h) in enumerate(RESOLUTION_OPTIONS):
-        res_rect = pygame.Rect(panel_x + 20, panel_y + 20 + res_y + i * res_spacing + settings_scroll_y, 200, 30)
+        res_rect = pygame.Rect(panel_x + 20, panel_y + 20 + res_y + (i + 1) * res_spacing + settings_scroll_y, 200, 30)
         res_rects.append((res_rect, i))
 
     fps_rects = []
@@ -2086,7 +2335,7 @@ def handle_events():
     global dialog_shown, current_dialog_index, current_state, editing_shortcut
     global info_scroll_y, settings_scroll_y, current_res_idx, current_fps_idx, current_fps, camera_x, camera_y, config
     global bgm_volume, sfx_volume, dragging_bgm_slider, dragging_sfx_slider
-    global bgm_slider_rect_global, sfx_slider_rect_global, screen, key_states, show_input_tip
+    global bgm_slider_rect_global, sfx_slider_rect_global, screen, key_states, show_input_tip, prev_game_state
     # 动画相关全局变量
     global is_animating, prev_state, next_state
     
@@ -2096,6 +2345,30 @@ def handle_events():
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+        
+        # 窗口大小改变事件处理
+        if event.type == pygame.VIDEORESIZE:
+            # 更新分辨率配置
+            new_width, new_height = event.size
+            config["resolution"] = (new_width, new_height)
+            # 检查是否是预设分辨率，如果不是则将current_res_idx设为-1表示自定义分辨率
+            if (new_width, new_height) in RESOLUTION_OPTIONS:
+                current_res_idx = RESOLUTION_OPTIONS.index((new_width, new_height))
+            else:
+                current_res_idx = -1
+            # 重新创建屏幕，保持RESIZABLE标志
+            screen = pygame.display.set_mode(config["resolution"], pygame.RESIZABLE)
+            # 更新字体大小
+            update_fonts(config["resolution"])
+            # 清除缓存，确保界面重新绘制
+            global game_info_cache, game_info_cache_resolution, game_info_cache_scroll_y
+            global settings_cache, settings_cache_resolution, settings_cache_scroll_y
+            game_info_cache = None
+            game_info_cache_resolution = None
+            game_info_cache_scroll_y = None
+            settings_cache = None
+            settings_cache_resolution = None
+            settings_cache_scroll_y = None
 
         # 键盘按键事件 - 按下
         if event.type == pygame.KEYDOWN:
@@ -2183,42 +2456,52 @@ def handle_events():
                     info_scroll_y += event.y * scroll_speed
                 elif current_state == GameState.SETTINGS:
                     settings_scroll_y += event.y * 20
+                elif current_state == GameState.GAME_SETTINGS:
+                    settings_scroll_y += event.y * 20
 
         # 鼠标点击事件（所有界面按钮交互）
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # 左键点击
-                # 主菜单界面 - 无论当前状态是什么，都检查主菜单按钮，因为我们保留了主菜单
-                start_btn, setting_btn, info_btn, quit_btn = draw_main_menu()
-                
-                # 动画正在运行时，忽略所有按钮点击（除了退出确认）
-                if not is_animating:
-                    if start_btn.collidepoint(mouse_pos):
-                        # 只有当前状态不是副本选择时，才触发动画
-                        if current_state != GameState.COPY_SELECT:
-                            # 触发动画，从当前状态切换到副本选择
-                            is_animating = True
-                            prev_state = current_state
-                            next_state = GameState.COPY_SELECT
-                            animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
-                    elif setting_btn.collidepoint(mouse_pos):
-                        # 只有当前状态不是设置时，才触发动画
-                        if current_state != GameState.SETTINGS:
-                            # 触发动画，从当前状态切换到设置
-                            is_animating = True
-                            prev_state = current_state
-                            next_state = GameState.SETTINGS
-                            animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
-                    elif info_btn.collidepoint(mouse_pos):
-                        # 只有当前状态不是游戏信息时，才触发动画
-                        if current_state != GameState.GAME_INFO:
-                            # 触发动画，从当前状态切换到游戏信息
-                            is_animating = True
-                            prev_state = current_state
-                            next_state = GameState.GAME_INFO
-                            animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
-                    elif quit_btn.collidepoint(mouse_pos):
-                        # 显示退出确认弹窗，不使用动画
-                        current_state = GameState.QUIT_CONFIRM
+                # 当处于游戏中的设置界面时，不处理主菜单按钮
+                if current_state != GameState.GAME_SETTINGS:
+                    # 主菜单界面 - 无论当前状态是什么，都检查主菜单按钮，因为我们保留了主菜单
+                    start_btn, setting_btn, info_btn, quit_btn, github_rect = draw_main_menu()
+                    
+                    # 动画正在运行时，忽略所有按钮点击（除了退出确认）
+                    if not is_animating:
+                        if start_btn.collidepoint(mouse_pos):
+                            # 只有当前状态不是副本选择时，才触发动画
+                            if current_state != GameState.COPY_SELECT:
+                                # 触发动画，从当前状态切换到副本选择
+                                is_animating = True
+                                prev_state = current_state
+                                next_state = GameState.COPY_SELECT
+                                animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+                        elif setting_btn.collidepoint(mouse_pos):
+                            # 只有当前状态不是设置时，才触发动画
+                            if current_state != GameState.SETTINGS:
+                                # 触发动画，从当前状态切换到设置
+                                is_animating = True
+                                prev_state = current_state
+                                next_state = GameState.SETTINGS
+                                animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+                        elif info_btn.collidepoint(mouse_pos):
+                            # 只有当前状态不是游戏信息时，才触发动画
+                            if current_state != GameState.GAME_INFO:
+                                # 触发动画，从当前状态切换到游戏信息
+                                is_animating = True
+                                prev_state = current_state
+                                next_state = GameState.GAME_INFO
+                                animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+                        elif quit_btn.collidepoint(mouse_pos):
+                            # 显示退出确认弹窗，不使用动画
+                            current_state = GameState.QUIT_CONFIRM
+                        elif github_rect.collidepoint(mouse_pos):
+                            # 点击GitHub图标，打开指定链接
+                            webbrowser.open("https://github.com/Hello-ABYDOS-27/EF-ADH-main")
+                else:
+                    # 处于游戏中的设置界面时，只绘制主菜单（不处理按钮点击）
+                    draw_main_menu()  # 忽略返回值，只绘制界面
 
                 # 处理当前状态的按钮点击，无论动画是否正在播放
                 # 退出确认弹窗
@@ -2266,15 +2549,20 @@ def handle_events():
 
                 # 设置界面（处理分辨率、帧率、快捷键、音量滑杆）
                 elif current_state == GameState.SETTINGS:
+                    # 调用draw_settings函数
                     back_btn, shortcut_rects, reset_rects, res_rects, fps_rects, bgm_slider_rect, sfx_slider_rect, bgm_thumb_rect, sfx_thumb_rect = draw_settings()
                     # 不再处理返回按钮，因为已经删除了
                     # 分辨率选择
                     for res_rect, idx in res_rects:
                         if res_rect.collidepoint(mouse_pos):
-                            current_res_idx = idx
-                            config["resolution"] = RESOLUTION_OPTIONS[idx]
-                            global screen
-                            screen = pygame.display.set_mode(config["resolution"], pygame.RESIZABLE)
+                            if idx == -1:
+                                # 点击的是自定义分辨率，不做任何操作
+                                pass
+                            else:
+                                # 点击的是预设分辨率，切换到该分辨率
+                                current_res_idx = idx
+                                config["resolution"] = RESOLUTION_OPTIONS[idx]
+                                screen = pygame.display.set_mode(config["resolution"], pygame.RESIZABLE)
                     # 帧率选择
                     for fps_rect, idx in fps_rects:
                         if fps_rect.collidepoint(mouse_pos):
@@ -2289,7 +2577,7 @@ def handle_events():
                         if reset_rect.collidepoint(mouse_pos):
                             config["shortcuts"][key] = DEFAULT_SHORTCUTS[key]
                     # BGM滑杆拖拽启动（点击滑杆或滑块）
-                    if bgm_thumb_rect.collidepoint(mouse_pos) or bgm_slider_rect.collidepoint(mouse_pos):
+                    if current_state == GameState.SETTINGS and (bgm_thumb_rect.collidepoint(mouse_pos) or bgm_slider_rect.collidepoint(mouse_pos)):
                         dragging_bgm_slider = True
                         # 保存滑块rect到全局变量，用于鼠标移动事件处理
                         bgm_slider_rect_global = bgm_slider_rect
@@ -2309,7 +2597,7 @@ def handle_events():
                         pygame.mixer.music.set_volume(bgm_volume)
                         print(f"BGM滑块点击: 位置={slider_x}, 音量={bgm_volume*100:.0f}%")
                     # 音效滑杆拖拽启动（点击滑杆或滑块）
-                    if sfx_thumb_rect.collidepoint(mouse_pos) or sfx_slider_rect.collidepoint(mouse_pos):
+                    if current_state == GameState.SETTINGS and (sfx_thumb_rect.collidepoint(mouse_pos) or sfx_slider_rect.collidepoint(mouse_pos)):
                         dragging_sfx_slider = True
                         # 保存滑块rect到全局变量，用于鼠标移动事件处理
                         sfx_slider_rect_global = sfx_slider_rect
@@ -2336,6 +2624,93 @@ def handle_events():
                     if current_dialog_index >= len(dialog_content):
                         dialog_shown = False
                         current_state = GameState.HOSPITAL  # 返回游戏场景
+
+                # 游戏中的设置框
+                elif current_state == GameState.GAME_SETTINGS:
+                    # 获取设置框的交互元素
+                    interactive_elements = draw_game_settings()
+                    for element_type, element in interactive_elements:
+                        if element_type == "close" and element.collidepoint(mouse_pos):
+                            # 关闭设置框，返回之前的游戏状态
+                            current_state = prev_game_state
+                            break
+                        elif element_type == "resolution":
+                            # 处理分辨率选择
+                            for res_rect, idx in element:
+                                if res_rect.collidepoint(mouse_pos):
+                                    if idx == -1:
+                                        # 点击的是自定义分辨率，不做任何操作
+                                        pass
+                                    else:
+                                        # 点击的是预设分辨率，切换到该分辨率
+                                        current_res_idx = idx
+                                        config["resolution"] = RESOLUTION_OPTIONS[idx]
+                                        screen = pygame.display.set_mode(config["resolution"], pygame.RESIZABLE)
+                                    break
+                        elif element_type == "fps":
+                            # 处理帧率选择
+                            for fps_rect, idx in element:
+                                if fps_rect.collidepoint(mouse_pos):
+                                    current_fps_idx = idx
+                                    current_fps = FPS_OPTIONS[idx]
+                                    break
+                        elif element_type == "bgm_slider" or element_type == "bgm_thumb":
+                            # 处理BGM音量滑块
+                            dragging_bgm_slider = True
+                            
+                            # 滑块背景的宽度固定为300像素（在draw_game_settings中定义）
+                            slider_bg_width = 300
+                            
+                            if element_type == "bgm_slider":
+                                # 如果点击的是滑块背景，直接使用其Rect
+                                bgm_slider_rect_global = element
+                                slider_rect = element
+                            else:  # bgm_thumb
+                                # 如果点击的是滑块按钮，滑块背景的x坐标是固定的settings_x + 20
+                                # 从滑块按钮的位置计算出滑块背景的y坐标
+                                settings_x = (config["resolution"][0] - 850) // 2  # 设置框左边缘x坐标
+                                settings_y = (config["resolution"][1] - 600) // 2  # 设置框上边缘y坐标
+                                slider_x = settings_x + 20  # 滑块背景的x坐标是固定的
+                                slider_y = element.y + (element.height - 8) // 2  # 滑块背景高度为8像素
+                                slider_rect = pygame.Rect(slider_x, slider_y, slider_bg_width, 8)
+                                bgm_slider_rect_global = slider_rect
+                            
+                            # 点击滑杆直接定位到点击位置
+                            mouse_x, mouse_y = mouse_pos
+                            # 计算鼠标在滑块背景上的相对位置
+                            slider_x = mouse_x - slider_rect.x
+                            raw_volume = slider_x / slider_bg_width  # 使用滑块背景的宽度
+                            bgm_volume = max(0.0, min(1.0, raw_volume))
+                            pygame.mixer.music.set_volume(bgm_volume)
+                        elif element_type == "sfx_slider" or element_type == "sfx_thumb":
+                            # 处理音效音量滑块
+                            dragging_sfx_slider = True
+                            
+                            # 滑块背景的宽度固定为300像素（在draw_game_settings中定义）
+                            slider_bg_width = 300
+                            
+                            if element_type == "sfx_slider":
+                                # 如果点击的是滑块背景，直接使用其Rect
+                                sfx_slider_rect_global = element
+                                slider_rect = element
+                            else:  # sfx_thumb
+                                # 如果点击的是滑块按钮，滑块背景的x坐标是固定的settings_x + 20
+                                # 从滑块按钮的位置计算出滑块背景的y坐标
+                                settings_x = (config["resolution"][0] - 850) // 2  # 设置框左边缘x坐标
+                                settings_y = (config["resolution"][1] - 600) // 2  # 设置框上边缘y坐标
+                                slider_x = settings_x + 20  # 滑块背景的x坐标是固定的
+                                slider_y = element.y + (element.height - 8) // 2  # 滑块背景高度为8像素
+                                slider_rect = pygame.Rect(slider_x, slider_y, slider_bg_width, 8)
+                                sfx_slider_rect_global = slider_rect
+                            
+                            # 点击滑杆直接定位到点击位置
+                            mouse_x, mouse_y = mouse_pos
+                            # 计算鼠标在滑块背景上的相对位置
+                            slider_x = mouse_x - slider_rect.x
+                            raw_volume = slider_x / slider_bg_width  # 使用滑块背景的宽度
+                            sfx_volume = max(0.0, min(1.0, raw_volume))
+                            if 'gate_sound' in globals() and gate_sound:
+                                gate_sound.set_volume(sfx_volume)
 
                 # 暂停界面按钮（存档/设置/返回副本选择）
                 elif is_paused and current_state in [GameState.HOSPITAL, GameState.CAFE]:
@@ -2375,14 +2750,13 @@ def handle_events():
                     if save_btn.collidepoint(mouse_pos):
                         print("💾 存档成功！（实际项目中需添加文件存储逻辑）")
                     elif settings_btn.collidepoint(mouse_pos):
-                        # 进入设置界面
+                        # 进入游戏中的设置界面
                         is_paused = False
                         pygame.mixer.music.unpause()
-                        # 触发动画，从当前状态切换到设置
-                        is_animating = True
-                        prev_state = current_state
-                        next_state = GameState.SETTINGS
-                        animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+                        # 保存当前游戏状态
+                        prev_game_state = current_state
+                        # 直接切换到游戏设置状态，不触发动画
+                        current_state = GameState.GAME_SETTINGS
                     elif back_btn.collidepoint(mouse_pos):
                         current_state = GameState.COPY_SELECT
                         is_paused = False
@@ -2401,13 +2775,10 @@ def handle_events():
             mouse_pos = pygame.mouse.get_pos()
             
             if dragging_bgm_slider and bgm_slider_rect_global is not None:
-                # 使用与draw_settings中相同的面板位置计算函数
+                # 直接使用滑块背景的Rect来计算鼠标相对位置
                 mouse_x, mouse_y = mouse_pos
-                panel_x, _, _, _ = calculate_panel_position(config["resolution"])
-                offset_x = panel_x + 20
-                adjusted_mouse_pos_x = mouse_x - offset_x
-                
-                slider_x = adjusted_mouse_pos_x
+                # 计算鼠标在滑块背景上的相对位置
+                slider_x = mouse_x - bgm_slider_rect_global.x
                 raw_volume = slider_x / bgm_slider_rect_global.width
                 # 严格边界检查，确保音量在0.0-1.0范围内
                 bgm_volume = max(0.0, min(1.0, raw_volume))
@@ -2415,13 +2786,10 @@ def handle_events():
                 print(f"BGM滑块拖拽: 位置={slider_x}, 音量={bgm_volume*100:.0f}%")
             
             if dragging_sfx_slider and sfx_slider_rect_global is not None:
-                # 使用与draw_settings中相同的面板位置计算函数
+                # 直接使用滑块背景的Rect来计算鼠标相对位置
                 mouse_x, mouse_y = mouse_pos
-                panel_x, _, _, _ = calculate_panel_position(config["resolution"])
-                offset_x = panel_x + 20
-                adjusted_mouse_pos_x = mouse_x - offset_x
-                
-                slider_x = adjusted_mouse_pos_x
+                # 计算鼠标在滑块背景上的相对位置
+                slider_x = mouse_x - sfx_slider_rect_global.x
                 raw_volume = slider_x / sfx_slider_rect_global.width
                 # 严格边界检查，确保音量在0.0-1.0范围内
                 sfx_volume = max(0.0, min(1.0, raw_volume))
@@ -2514,6 +2882,15 @@ def main():
                     current_state = GameState.HOSPITAL
             elif current_state == GameState.QUIT_CONFIRM:
                 draw_quit_confirm()
+            elif current_state == GameState.GAME_SETTINGS:
+                # 游戏中显示的设置框
+                # 先绘制当前游戏场景作为背景
+                if prev_game_state == GameState.HOSPITAL:
+                    draw_hospital()
+                elif prev_game_state == GameState.CAFE:
+                    draw_cafe()
+                # 然后绘制设置框
+                draw_game_settings()
 
         # 刷新屏幕
         pygame.display.flip()
