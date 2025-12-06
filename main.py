@@ -3,6 +3,13 @@ import sys
 import math
 import webbrowser
 import os
+import socket
+import json
+import threading
+import time
+
+# 导入GitHub工具模块
+import github_utils
 
 # 资源文件路径处理
 def resource_path(relative_path):
@@ -90,9 +97,15 @@ class GameState:
     CAFE = 3
     SETTINGS = 4
     GAME_INFO = 5
-    DIALOG = 6
-    QUIT_CONFIRM = 7
-    GAME_SETTINGS = 8  # 游戏中显示的设置框
+    ABOUT = 6  # 关于与鸣谢
+    DIALOG = 7
+    QUIT_CONFIRM = 8
+    GAME_SETTINGS = 9  # 游戏中显示的设置框
+    ONLINE_LOBBY = 10   # 联机大厅
+    ONLINE_GAME = 11    # 联机游戏中
+    MORE_MENU = 12      # 更多菜单
+    FEEDBACK = 13       # 反馈功能
+    FEATURE_VOTE = 14   # 新功能投票
 
 # 全局状态变量（保留原有，新增滑杆交互变量，初始化settings_scroll_y和按键状态）
 current_state = GameState.MAIN_MENU
@@ -130,6 +143,11 @@ game_info_cache_scroll_y = None  # 缓存对应的滚动位置
 settings_cache = None  # 设置页面的缓存表面
 settings_cache_resolution = None  # 缓存对应的分辨率
 settings_cache_scroll_y = None  # 缓存对应的滚动位置
+
+# 新增：联机游戏相关变量
+online_client = None  # 游戏客户端实例
+other_players = {}  # 其他玩家状态
+online_mode = False  # 是否开启联机模式
 
 # 动画相关状态变量
 is_animating = False  # 动画是否正在播放
@@ -169,9 +187,10 @@ camera_x = 0
 camera_y = 0
 
 # 废弃医院/咖啡厅地图配置（完全保留原有）
+WALL_THICKNESS = 30
 GATE_WIDTH = GRID_SIZE * 3
-GATE_HEIGHT = GRID_SIZE * 2
-GATE_Y = FLOOR_HEIGHT * 2 // 3 - GRID_SIZE
+GATE_HEIGHT = WALL_THICKNESS
+GATE_Y = FLOOR_HEIGHT * 2 // 3 - GATE_HEIGHT // 2
 GATE_X = (FLOOR_WIDTH - GATE_WIDTH) // 2
 GATE_RECT = pygame.Rect(GATE_X, GATE_Y, GATE_WIDTH, GATE_HEIGHT)
 GATE_TRIGGER_RANGE = 100
@@ -192,17 +211,16 @@ CAFE_GATE_RECT = pygame.Rect(
     CAFE_GATE_THICKNESS
 )
 CAFE_GATE_TRIGGER_RANGE = 80
-WALL_THICKNESS = 15
 WALL_LEFT_RECT = pygame.Rect(
     0,
     GATE_Y + (GATE_HEIGHT - WALL_THICKNESS) // 2,
-    GATE_X - 20,
+    GATE_X,
     WALL_THICKNESS
 )
 WALL_RIGHT_RECT = pygame.Rect(
-    GATE_X + GATE_WIDTH + 20,
+    GATE_X + GATE_WIDTH,
     GATE_Y + (GATE_HEIGHT - WALL_THICKNESS) // 2,
-    FLOOR_WIDTH - (GATE_X + GATE_WIDTH + 20),
+    FLOOR_WIDTH - (GATE_X + GATE_WIDTH),
     WALL_THICKNESS
 )
 INNER_WALL_RECTS = [WALL_LEFT_RECT, WALL_RIGHT_RECT]
@@ -241,7 +259,7 @@ update_fonts(config["resolution"])
 
 # 面板位置计算的公共函数，确保draw_settings和handle_events使用相同的逻辑
 def calculate_panel_position(resolution):
-    """计算设置面板的位置和尺寸，确保UI元素坐标计算一致
+    """计算弹窗面板的位置和尺寸，确保UI元素坐标计算一致
     
     Args:
         resolution: 游戏分辨率元组 (width, height)
@@ -249,26 +267,15 @@ def calculate_panel_position(resolution):
     Returns:
         tuple: (panel_x, panel_y, panel_width, panel_height)
     """
-    # 主菜单位置和尺寸，确保设置面板不会覆盖主菜单
-    main_menu_x = 150
-    main_menu_width = 250
-    main_menu_right = main_menu_x + main_menu_width
-    
-    # 确保设置面板与主菜单之间有至少50像素的间距
-    min_panel_x = main_menu_right + 50
-    
-    # 根据当前分辨率动态计算面板宽度，确保在不同分辨率下都合适
-    # 面板最大宽度 = 屏幕宽度 - 右边距(50) - 最小x坐标(min_panel_x)
-    max_possible_width = resolution[0] - 50 - min_panel_x
-    # 面板宽度占屏幕宽度的比例，范围在300-800之间，同时不超过最大可能宽度
-    panel_width = min(max(int(resolution[0] * 0.5), 300), 800, max_possible_width)
+    # 根据当前分辨率动态计算弹窗宽度，确保在不同分辨率下都合适
+    # 面板宽度占屏幕宽度的比例，范围在300-800之间
+    panel_width = min(max(int(resolution[0] * 0.5), 300), 800)
     # 面板高度占屏幕高度的比例，范围在400-800之间
     panel_height = min(max(int(resolution[1] * 0.7), 400), 800)
-    # 计算面板x坐标，确保不会覆盖主菜单
-    panel_x = resolution[0] - panel_width - 50
-    panel_x = max(panel_x, min_panel_x)
-    # 保持Y位置不变，距离顶部100像素
-    panel_y = 100
+    # 计算面板x坐标，居中显示
+    panel_x = (resolution[0] - panel_width) // 2
+    # 计算面板y坐标，居中显示
+    panel_y = (resolution[1] - panel_height) // 2
     return panel_x, panel_y, panel_width, panel_height
 
 # 音频资源路径（修复咖啡厅BGM路径拼写错误：cafe_bgn.mp3 → cafe_bgm.mp3）
@@ -520,6 +527,69 @@ class Player:
         draw_y = self.y - camera_y - self.height//2
         surface.blit(self.current_img, (draw_x, draw_y))
 
+# 联机游戏客户端类
+class GameClient:
+    def __init__(self, host='localhost', port=5555):
+        self.host = host
+        self.port = port
+        self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.connected = False
+        self.players = {}
+        self.lock = threading.Lock()
+        self.player_id = None
+    
+    def connect(self):
+        try:
+            self.client.connect((self.host, self.port))
+            self.connected = True
+            print(f"已连接到服务器 {self.host}:{self.port}")
+            
+            # 启动接收线程
+            recv_thread = threading.Thread(target=self.receive)
+            recv_thread.daemon = True
+            recv_thread.start()
+            
+            return True
+        except Exception as e:
+            print(f"连接服务器失败: {e}")
+            self.connected = False
+            return False
+    
+    def receive(self):
+        while self.connected:
+            try:
+                data = self.client.recv(1024).decode()
+                if not data:
+                    break
+                
+                message = json.loads(data)
+                with self.lock:
+                    self.players = message.get('players', {})
+            except Exception as e:
+                print(f"接收数据错误: {e}")
+                self.connected = False
+                break
+    
+    def send(self, data):
+        if self.connected:
+            try:
+                message = json.dumps(data).encode()
+                self.client.send(message)
+            except Exception as e:
+                print(f"发送数据错误: {e}")
+                self.connected = False
+    
+    def get_players(self):
+        with self.lock:
+            return dict(self.players)
+    
+    def disconnect(self):
+        self.connected = False
+        try:
+            self.client.close()
+        except:
+            pass
+
 # 界面绘制辅助函数（对话框+NPC初始化，NPC尺寸保持200×200像素）
 def init_npc_img():
     try:
@@ -723,14 +793,14 @@ def draw_hospital():
         screen.blit(hint_surf, (hint_x, hint_y))
     else:
         if not gate_is_open:
-            hint_text = f"按{pygame.key.name(config['shortcuts']['open_gate'])}打开大门"
+            hint_text = "按e打开大门"
         else:
             hint_text = "✅ 大门已打开，可直接穿过！"
         hint_surf = small_font.render(hint_text, True, (0, 255, 0))
         hint_bg = pygame.Surface((hint_surf.get_width() + 20, hint_surf.get_height() + 10), pygame.SRCALPHA)
         pygame.draw.rect(hint_bg, (0, 0, 0, 200), (0, 0, hint_bg.get_width(), hint_bg.get_height()), border_radius=5)
         hint_x = (GATE_RECT.x + GATE_RECT.width//2) - camera_x - hint_surf.get_width()//2
-        hint_y = GATE_RECT.y - camera_x - 50
+        hint_y = GATE_RECT.y - camera_y - 50
         screen.blit(hint_bg, (hint_x - 10, hint_y - 5))
         screen.blit(hint_surf, (hint_x, hint_y))
 
@@ -1004,7 +1074,7 @@ def draw_main_menu():
     base_size = min(config["resolution"][0], config["resolution"][1])
     
     menu_width = int(base_size * 0.25)  # 菜单宽度占屏幕最小边的25%
-    menu_height = int(base_size * 0.35)  # 菜单高度占屏幕最小边的35%
+    menu_height = int(base_size * 0.45)  # 菜单高度占屏幕最小边的45%，增加高度以容纳新按钮
     menu_x = 150
     menu_y = (config["resolution"][1] - menu_height) // 2
 
@@ -1012,16 +1082,39 @@ def draw_main_menu():
     pygame.draw.rect(screen, BUTTON_COLOR, (menu_x, menu_y, menu_width, menu_height), 2)
 
     # 绘制标题，确保不超出菜单宽度
-    title_text = option_font.render("逃离学校剧本", True, TEXT_COLOR)
-    # 计算标题位置，确保居中且不超出菜单
+    # 计算合适的标题字体大小
+    max_title_width = menu_width - 40  # 留40像素边距
+    title_font_size = int(base_size * 0.06)  # 初始字体大小
+    
+    # 尝试找到合适的字体大小
+    title_font = None
+    title_text = None
+    
+    # 先尝试使用默认的menu_font
+    title_text = menu_font.render("逃离学校剧本", True, TEXT_COLOR)
+    
+    # 如果默认字体太大，尝试缩小
+    if title_text.get_width() > max_title_width:
+        # 计算所需的缩放比例
+        scale_factor = max_title_width / title_text.get_width()
+        new_font_size = int(title_font_size * scale_factor)
+        
+        # 创建适合大小的字体
+        try:
+            title_font = pygame.font.SysFont("SimHei", new_font_size)
+        except:
+            title_font = pygame.font.SysFont(None, new_font_size)
+        title_text = title_font.render("逃离学校剧本", True, TEXT_COLOR)
+    
+    # 计算标题位置，确保居中
     title_x = menu_x + (menu_width - title_text.get_width()) // 2
     title_y = menu_y + 35
     screen.blit(title_text, (title_x, title_y))
 
     btn_width = menu_width - 20
-    btn_height = int(base_size * 0.05)  # 按钮高度占屏幕最小边的5%
-    button_y_offset = int(base_size * 0.08)  # 按钮起始位置偏移
-    button_spacing = int(base_size * 0.06)  # 按钮间距
+    btn_height = int(base_size * 0.07)  # 增加按钮高度到屏幕最小边的7%
+    button_y_offset = int(base_size * 0.1)  # 调整按钮起始位置偏移
+    button_spacing = int(base_size * 0.08)  # 增加按钮间距
 
     # 开始游戏按钮
     start_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset, btn_width, btn_height)
@@ -1031,29 +1124,30 @@ def draw_main_menu():
     pygame.draw.rect(screen, (100, 180, 255) if start_is_hovered else (0, 0, 0), start_btn, 2)
     # 鼠标悬停时文本颜色变为高亮
     start_text_color = (255, 255, 255) if start_is_hovered else (200, 200, 200)
+    # 直接使用现有的option_font，它已经支持中文
     start_text = option_font.render("开始游戏", True, start_text_color)
     start_text_pos = start_text.get_rect(center=start_btn.center)
     screen.blit(start_text, start_text_pos)
 
-    # 设置按钮
-    setting_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset + button_spacing, btn_width, btn_height)
-    setting_is_hovered = setting_btn.collidepoint(pygame.mouse.get_pos())
-    pygame.draw.rect(screen, (60, 120, 200), setting_btn)
-    pygame.draw.rect(screen, (100, 180, 255) if setting_is_hovered else (0, 0, 0), setting_btn, 2)
-    setting_text_color = (255, 255, 255) if setting_is_hovered else (200, 200, 200)
-    setting_text = option_font.render("设置", True, setting_text_color)
-    setting_text_pos = setting_text.get_rect(center=setting_btn.center)
-    screen.blit(setting_text, setting_text_pos)
+    # 联机模式按钮
+    online_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset + button_spacing, btn_width, btn_height)
+    online_is_hovered = online_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (60, 200, 120), online_btn)
+    pygame.draw.rect(screen, (100, 255, 180) if online_is_hovered else (0, 0, 0), online_btn, 2)
+    online_text_color = (255, 255, 255) if online_is_hovered else (200, 200, 200)
+    online_text = option_font.render("联机模式", True, online_text_color)
+    online_text_pos = online_text.get_rect(center=online_btn.center)
+    screen.blit(online_text, online_text_pos)
 
-    # 游戏信息按钮
-    info_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset + button_spacing * 2, btn_width, btn_height)
-    info_is_hovered = info_btn.collidepoint(pygame.mouse.get_pos())
-    pygame.draw.rect(screen, (60, 120, 200), info_btn)
-    pygame.draw.rect(screen, (100, 180, 255) if info_is_hovered else (0, 0, 0), info_btn, 2)
-    info_text_color = (255, 255, 255) if info_is_hovered else (200, 200, 200)
-    info_text = option_font.render("游戏信息", True, info_text_color)
-    info_text_pos = info_text.get_rect(center=info_btn.center)
-    screen.blit(info_text, info_text_pos)
+    # 更多按钮
+    more_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset + button_spacing * 2, btn_width, btn_height)
+    more_is_hovered = more_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (60, 120, 200), more_btn)
+    pygame.draw.rect(screen, (100, 180, 255) if more_is_hovered else (0, 0, 0), more_btn, 2)
+    more_text_color = (255, 255, 255) if more_is_hovered else (200, 200, 200)
+    more_text = option_font.render("更多", True, more_text_color)
+    more_text_pos = more_text.get_rect(center=more_btn.center)
+    screen.blit(more_text, more_text_pos)
 
     # 退出游戏按钮 - 保持红色不变
     quit_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset + button_spacing * 3, btn_width, btn_height)
@@ -1091,7 +1185,7 @@ def draw_main_menu():
         github_text_rect = github_text.get_rect(center=github_rect.center)
         screen.blit(github_text, github_text_rect)
 
-    return start_btn, setting_btn, info_btn, quit_btn, github_rect
+    return start_btn, more_btn, online_btn, quit_btn, github_rect
 
 # 游戏中的设置框绘制函数
 def draw_game_settings():
@@ -1236,8 +1330,38 @@ def draw_game_settings():
     sfx_thumb_y = volume_y + 150 + 4 - bgm_thumb_radius
     pygame.draw.circle(scroll_surface, SLIDER_THUMB_COLOR, (sfx_thumb_x + bgm_thumb_radius, sfx_thumb_y + bgm_thumb_radius), bgm_thumb_radius)
     
+    # 联机模式设置
+    online_title = option_font.render("联机模式", True, TEXT_COLOR)
+    online_y = volume_y + 200
+    scroll_surface.blit(online_title, (0, online_y))
+    
+    # 联机模式开关
+    online_label = small_font.render("开启联机模式", True, TEXT_COLOR)
+    scroll_surface.blit(online_label, (0, online_y + 40))
+    
+    # 开关按钮
+    toggle_width = 60
+    toggle_height = 30
+    toggle_x = 200
+    toggle_y = online_y + 35
+    toggle_rect = pygame.Rect(toggle_x, toggle_y, toggle_width, toggle_height)
+    
+    # 绘制开关背景
+    pygame.draw.rect(scroll_surface, SLIDER_BG_COLOR, toggle_rect, border_radius=15)
+    
+    # 绘制开关滑块
+    thumb_x = toggle_x + 5 + (toggle_width - 20) * online_mode
+    thumb_y = toggle_y + 5
+    pygame.draw.circle(scroll_surface, SLIDER_THUMB_COLOR, (thumb_x + 10, thumb_y + 10), 10)
+    
+    # 显示当前状态
+    status_text = "在线" if online_mode else "离线"
+    status_color = (0, 255, 0) if online_mode else (255, 0, 0)
+    status_surf = small_font.render(status_text, True, status_color)
+    scroll_surface.blit(status_surf, (toggle_x + toggle_width + 15, toggle_y + 5))
+    
     # 计算滚动范围
-    total_content_height = volume_y + 200
+    total_content_height = online_y + 100
     max_scroll_y = max(0, total_content_height - (settings_height - 80))
     settings_scroll_y = max(-max_scroll_y, min(0, settings_scroll_y))
     
@@ -1296,6 +1420,15 @@ def draw_game_settings():
     )
     interactive_elements.append(("sfx_slider", sfx_slider_screen_rect))
     interactive_elements.append(("sfx_thumb", sfx_thumb_screen_rect))
+    
+    # 联机模式开关
+    online_toggle_screen_rect = pygame.Rect(
+        settings_x + 20 + 200, 
+        settings_y + 60 + online_y + 35 - settings_scroll_y, 
+        60, 
+        30
+    )
+    interactive_elements.append(("online_toggle", online_toggle_screen_rect))
     
     return interactive_elements
 
@@ -1364,18 +1497,34 @@ def draw_game_info():
     # 使用公共函数计算面板位置，确保与设置面板一致
     info_x, info_y, info_width, info_height = calculate_panel_position(config["resolution"])
     
-    title_text = menu_font.render("游戏信息", True, TEXT_COLOR)
-    # 标题显示在面板上方，与面板左对齐
-    # 绘制半透明背景，增强标题可读性
-    title_bg = pygame.Surface((title_text.get_width() + 20, title_text.get_height() + 10), pygame.SRCALPHA)
-    pygame.draw.rect(title_bg, (0, 0, 0, 150), (0, 0, title_text.get_width() + 20, title_text.get_height() + 10), border_radius=3)
-    screen.blit(title_bg, (info_x - 10, 50 - 5))
-    screen.blit(title_text, (info_x, 50))
-    info_bottom_y = info_y + info_height
-
-    # 创建信息面板背景和边框
+    # 绘制半透明遮罩，增强弹窗效果
+    mask = pygame.Surface(config["resolution"], pygame.SRCALPHA)
+    pygame.draw.rect(mask, (0, 0, 0, 150), mask.get_rect())
+    screen.blit(mask, (0, 0))
+    
+    # 绘制弹窗背景
     pygame.draw.rect(screen, MENU_BG, (info_x, info_y, info_width, info_height))
     pygame.draw.rect(screen, BUTTON_COLOR, (info_x, info_y, info_width, info_height), 2)
+    
+    # 绘制标题，显示在弹窗外部上方
+    title_text = menu_font.render("游戏信息", True, TEXT_COLOR)
+    title_x = info_x + (info_width - title_text.get_width()) // 2
+    title_y = info_y - 60  # 将标题移到窗口顶部上方，更高位置
+    screen.blit(title_text, (title_x, title_y))
+    info_bottom_y = info_y + info_height
+    
+    # 绘制关闭按钮
+    close_btn_size = 30
+    close_btn = pygame.Rect(info_x + info_width - close_btn_size - 10, info_y + 10, close_btn_size, close_btn_size)
+    pygame.draw.rect(screen, (200, 60, 60), close_btn, border_radius=5)
+    pygame.draw.rect(screen, (255, 0, 0), close_btn, 2, border_radius=5)
+    close_text = small_font.render("×", True, TEXT_COLOR)
+    close_text_pos = close_text.get_rect(center=close_btn.center)
+    screen.blit(close_text, close_text_pos)
+    
+    # 计算文本起始位置，基于标题的实际高度
+    title_height = title_text.get_height()
+    title_height_offset = title_height + 40  # 标题高度 + 40像素间距
 
     # 定义游戏信息内容
     info_content = [
@@ -1506,25 +1655,28 @@ def draw_game_info():
         if current_line:
             wrapped_content.append(current_line)
     
-    # 计算总高度和滚动区域
+    # 渲染换行后的文本，添加标题高度偏移量，避免与标题重叠
+    title_height_offset = 80  # 增加标题偏移量，确保文本与标题完全分离
+    
+    # 计算总高度和滚动区域，考虑标题高度偏移量
     total_height = len(wrapped_content) * line_height
-    scrollable_area = max(0, total_height - info_height)
+    visible_content_height = info_height - title_height_offset  # 可见内容高度
+    scrollable_area = max(0, total_height - visible_content_height)
 
     # 确保滚动位置在有效范围内
     info_scroll_y = max(-scrollable_area, min(0, info_scroll_y))
 
     # 创建一个裁剪区域，确保文本不会超出容器边界
-    clip_rect = pygame.Rect(info_x + 20, info_y, info_width - 40, info_height)
+    clip_rect = pygame.Rect(info_x + 20, info_y + title_height_offset, info_width - 40, visible_content_height)
     original_clip = screen.get_clip()  # 保存原始裁剪区域
     screen.set_clip(clip_rect)  # 设置裁剪区域
 
-    # 渲染换行后的文本
     for i, line in enumerate(wrapped_content):
-        line_top_y = info_y + i * line_height + info_scroll_y
+        line_top_y = info_y + title_height_offset + i * line_height + info_scroll_y
         line_bottom_y = line_top_y + line_height
         
         # 只有当行与可见区域相交时才渲染
-        if line_bottom_y > info_y and line_top_y < info_bottom_y:
+        if line_bottom_y > info_y + title_height_offset and line_top_y < info_bottom_y:
             # 渲染文本
             text_surf = small_font.render(line, True, TEXT_COLOR)
             
@@ -1543,19 +1695,20 @@ def draw_game_info():
 
     # 恢复原始裁剪区域
     screen.set_clip(original_clip)
-
+    
     # 绘制滚动条
     if scrollable_area > 0:
         scrollbar_width = 8
-        scrollbar_height = max(20, (info_height / total_height) * info_height)  # 确保滚动条有最小高度
-        scrollbar_y = info_y + (-info_scroll_y / scrollable_area) * (info_height - scrollbar_height)
+        scrollbar_height = max(20, (visible_content_height / total_height) * visible_content_height)  # 确保滚动条有最小高度
+        # 调整滚动条Y坐标，考虑标题偏移量
+        scrollbar_y = info_y + title_height_offset + (-info_scroll_y / scrollable_area) * (visible_content_height - scrollbar_height)
         pygame.draw.rect(screen, BUTTON_HOVER, (info_x + info_width - 15, scrollbar_y, scrollbar_width, scrollbar_height), border_radius=3)
 
     # 播放菜单BGM
     if current_bgm != "menu":
         play_bgm("menu")
 
-    return None
+    return close_btn
 
 # 绘制指定状态的内容区域到表面上（不包括主菜单）
 def draw_content_to_surface(state, surface):
@@ -1626,12 +1779,15 @@ def draw_content_to_surface(state, surface):
         panel_x, panel_y, panel_width, panel_height = calculate_panel_position(config["resolution"])
         
         title_text = menu_font.render("游戏设置", True, TEXT_COLOR)
-        # 标题显示在面板上方，与面板左对齐
+        # 标题显示在面板外部上方
         # 绘制半透明背景，增强标题可读性
         title_bg = pygame.Surface((title_text.get_width() + 20, title_text.get_height() + 10), pygame.SRCALPHA)
         pygame.draw.rect(title_bg, (0, 0, 0, 150), (0, 0, title_text.get_width() + 20, title_text.get_height() + 10), border_radius=3)
-        screen.blit(title_bg, (panel_x - 10, 50 - 5))
-        screen.blit(title_text, (panel_x, 50))
+        # 将标题移到面板外部上方
+        title_bg_y = panel_y - 70 - 5
+        title_y = panel_y - 70
+        screen.blit(title_bg, (panel_x - 10, title_bg_y))
+        screen.blit(title_text, (panel_x, title_y))
         panel_bottom_y = panel_y + panel_height
         
         pygame.draw.rect(screen, MENU_BG, (panel_x, panel_y, panel_width, panel_height))
@@ -1766,15 +1922,16 @@ def draw_content_to_surface(state, surface):
         max_scroll_y = max(0, total_content_height - (panel_height - 40))
         settings_scroll_y = max(-max_scroll_y, min(0, settings_scroll_y))
         
-        # 绘制滚动内容（裁剪到面板范围内）
-        screen.blit(scroll_surface, (panel_x + 20, panel_y + 20), area=(0, -settings_scroll_y, panel_width - 40, panel_height - 40))
+        # 绘制滚动内容（裁剪到面板范围内），添加标题高度偏移量，避免与标题重叠
+        title_height_offset = 40  # 标题占用的高度
+        screen.blit(scroll_surface, (panel_x + 20, panel_y + 20 + title_height_offset), area=(0, -settings_scroll_y, panel_width - 40, panel_height - 60))
         
         # 滚动条
-        if max_scroll_y > 0:
-            scrollbar_width = 6
-            scrollbar_height = (panel_height - 40) / total_content_height * (panel_height - 40)
-            scrollbar_y = panel_y + 20 + (-settings_scroll_y / max_scroll_y) * (panel_height - 40 - scrollbar_height)
-            pygame.draw.rect(screen, BUTTON_HOVER, (panel_x + panel_width - 30, scrollbar_y, scrollbar_width, scrollbar_height), border_radius=3)
+    if max_scroll_y > 0:
+        scrollbar_width = 6
+        scrollbar_height = (panel_height - 60) / total_content_height * (panel_height - 60)
+        scrollbar_y = panel_y + 20 + title_height_offset + (-settings_scroll_y / max_scroll_y) * (panel_height - 60 - scrollbar_height)
+        pygame.draw.rect(screen, BUTTON_HOVER, (panel_x + panel_width - 30, scrollbar_y, scrollbar_width, scrollbar_height), border_radius=3)
         
     elif state == GameState.GAME_INFO:
         # 定义信息面板的尺寸和位置
@@ -1785,16 +1942,23 @@ def draw_content_to_surface(state, surface):
         info_bottom_y = info_y + info_height
         
         title_text = menu_font.render("游戏信息", True, TEXT_COLOR)
-        # 标题显示在面板上方，与面板左对齐
+        # 标题显示在面板外部上方
         # 绘制半透明背景，增强标题可读性
         title_bg = pygame.Surface((title_text.get_width() + 20, title_text.get_height() + 10), pygame.SRCALPHA)
         pygame.draw.rect(title_bg, (0, 0, 0, 150), (0, 0, title_text.get_width() + 20, title_text.get_height() + 10), border_radius=3)
-        screen.blit(title_bg, (info_x - 10, 50 - 5))
-        screen.blit(title_text, (info_x, 50))
+        # 将标题移到面板外部上方
+        title_bg_y = info_y - 70 - 5
+        title_y = info_y - 70
+        screen.blit(title_bg, (info_x - 10, title_bg_y))
+        screen.blit(title_text, (info_x, title_y))
         
         # 创建信息面板背景和边框
         pygame.draw.rect(screen, MENU_BG, (info_x, info_y, info_width, info_height))
         pygame.draw.rect(screen, BUTTON_COLOR, (info_x, info_y, info_width, info_height), 2)
+        
+        # 计算文本起始位置，基于标题的实际高度
+        title_height = title_text.get_height()
+        title_height_offset = title_height + 40  # 标题高度 + 40像素间距
         
         # 定义游戏信息内容
         info_content = [
@@ -1924,25 +2088,28 @@ def draw_content_to_surface(state, surface):
             if current_line:
                 wrapped_content.append(current_line)
         
-        # 计算总高度和滚动区域
+        # 渲染换行后的文本，添加标题高度偏移量，避免与标题重叠
+        title_height_offset = 80  # 增加标题偏移量，确保文本与标题完全分离
+        
+        # 计算总高度和滚动区域，考虑标题高度偏移量
         total_height = len(wrapped_content) * line_height
-        scrollable_area = max(0, total_height - info_height)
+        visible_content_height = info_height - title_height_offset  # 可见内容高度
+        scrollable_area = max(0, total_height - visible_content_height)
         
         # 确保滚动位置在有效范围内
         info_scroll_y = max(-scrollable_area, min(0, info_scroll_y))
         
         # 创建一个裁剪区域，确保文本不会超出容器边界
-        clip_rect = pygame.Rect(info_x + 20, info_y, info_width - 40, info_height)
+        clip_rect = pygame.Rect(info_x + 20, info_y + title_height_offset, info_width - 40, visible_content_height)
         original_clip = screen.get_clip()  # 保存原始裁剪区域
         screen.set_clip(clip_rect)  # 设置裁剪区域
         
-        # 渲染换行后的文本
         for i, line in enumerate(wrapped_content):
-            line_top_y = info_y + i * line_height + info_scroll_y
+            line_top_y = info_y + title_height_offset + i * line_height + info_scroll_y
             line_bottom_y = line_top_y + line_height
             
             # 只有当行与可见区域相交时才渲染
-            if line_bottom_y > info_y and line_top_y < info_bottom_y:
+            if line_bottom_y > info_y + title_height_offset and line_top_y < info_bottom_y:
                 # 渲染文本
                 text_surf = small_font.render(line, True, TEXT_COLOR)
                 
@@ -1965,10 +2132,169 @@ def draw_content_to_surface(state, surface):
         # 绘制滚动条
         if scrollable_area > 0:
             scrollbar_width = 8
-            scrollbar_height = max(20, (info_height / total_height) * info_height)  # 确保滚动条有最小高度
-            scrollbar_y = info_y + (-info_scroll_y / scrollable_area) * (info_height - scrollbar_height)
+            scrollbar_height = max(20, (visible_content_height / total_height) * visible_content_height)  # 确保滚动条有最小高度
+            # 调整滚动条Y坐标，考虑标题偏移量
+            scrollbar_y = info_y + title_height_offset + (-info_scroll_y / scrollable_area) * (visible_content_height - scrollbar_height)
             pygame.draw.rect(screen, BUTTON_HOVER, (info_x + info_width - 15, scrollbar_y, scrollbar_width, scrollbar_height), border_radius=3)
+
+    elif state == GameState.FEEDBACK:
+        # 定义反馈面板的尺寸和位置
+        feedback_width = 500  # 固定宽度，与设置面板一致
+        feedback_height = config["resolution"][1] - 200
+        feedback_x = config["resolution"][0] - feedback_width - 100  # 右侧计算，距离右边100像素，增加边距
+        feedback_y = 120
+        
+        # 绘制弹窗背景
+        pygame.draw.rect(screen, MENU_BG, (feedback_x, feedback_y, feedback_width, feedback_height))
+        pygame.draw.rect(screen, BUTTON_COLOR, (feedback_x, feedback_y, feedback_width, feedback_height), 2)
+        
+        # 绘制标题，显示在弹窗外部上方
+        title_text = menu_font.render("反馈功能", True, TEXT_COLOR)
+        # 标题显示在面板外部上方
+        # 绘制半透明背景，增强标题可读性
+        title_bg = pygame.Surface((title_text.get_width() + 20, title_text.get_height() + 10), pygame.SRCALPHA)
+        pygame.draw.rect(title_bg, (0, 0, 0, 150), (0, 0, title_text.get_width() + 20, title_text.get_height() + 10), border_radius=3)
+        # 将标题移到面板外部上方
+        title_bg_y = feedback_y - 70 - 5
+        title_y = feedback_y - 70
+        screen.blit(title_bg, (feedback_x - 10, title_bg_y))
+        screen.blit(title_text, (feedback_x, title_y))
+        
+        # 绘制关闭按钮
+        close_btn_size = 30
+        close_btn = pygame.Rect(feedback_x + feedback_width - close_btn_size - 10, feedback_y + 10, close_btn_size, close_btn_size)
+        pygame.draw.rect(screen, (200, 60, 60), close_btn, border_radius=5)
+        pygame.draw.rect(screen, (255, 0, 0), close_btn, 2, border_radius=5)
+        close_text = small_font.render("×", True, TEXT_COLOR)
+        close_text_pos = close_text.get_rect(center=close_btn.center)
+        screen.blit(close_text, close_text_pos)
+        
+        # 绘制提交反馈按钮（简化版，不包含交互逻辑，仅用于动画预览）
+        submit_btn_width = 150
+        submit_btn_height = 40
+        submit_btn = pygame.Rect(feedback_x + 20, feedback_y + 60, submit_btn_width, submit_btn_height)
+        pygame.draw.rect(screen, (60, 120, 200), submit_btn, border_radius=5)
+        pygame.draw.rect(screen, (0, 0, 0), submit_btn, 2, border_radius=5)
+        submit_text = option_font.render("提交反馈", True, (255, 255, 255))
+        submit_text_pos = submit_text.get_rect(center=submit_btn.center)
+        screen.blit(submit_text, submit_text_pos)
+        
+        # 绘制刷新按钮（简化版，不包含交互逻辑，仅用于动画预览）
+        refresh_btn_width = 100
+        refresh_btn_height = 40
+        refresh_btn = pygame.Rect(feedback_x + feedback_width - refresh_btn_width - 10, feedback_y + 60, refresh_btn_width, refresh_btn_height)
+        pygame.draw.rect(screen, (60, 120, 200), refresh_btn, border_radius=5)
+        pygame.draw.rect(screen, (0, 0, 0), refresh_btn, 2, border_radius=5)
+        refresh_text = small_font.render("刷新数据", True, (255, 255, 255))
+        refresh_text_pos = refresh_text.get_rect(center=refresh_btn.center)
+        screen.blit(refresh_text, refresh_text_pos)
+        
+        # 绘制反馈列表标题
+        list_title = option_font.render("最新反馈", True, TEXT_COLOR)
+        screen.blit(list_title, (feedback_x + 20, feedback_y + 120))
+        
+        # 绘制示例反馈内容
+        example_feedback = [
+            "• 建议增加更多游戏场景",
+            "• 希望优化游戏性能",
+            "• 建议添加更多游戏角色"
+        ]
+        line_height = small_font.get_linesize()
+        for i, text in enumerate(example_feedback):
+            text_surf = small_font.render(text, True, TEXT_COLOR)
+            screen.blit(text_surf, (feedback_x + 20, feedback_y + 160 + i * 30))
     
+    elif state == GameState.FEATURE_VOTE:
+        # 定义投票面板的尺寸和位置
+        vote_width = 500  # 固定宽度，与设置面板一致
+        vote_height = config["resolution"][1] - 200
+        vote_x = config["resolution"][0] - vote_width - 100  # 右侧计算，距离右边100像素，增加边距
+        vote_y = 120
+        
+        # 绘制弹窗背景
+        pygame.draw.rect(screen, MENU_BG, (vote_x, vote_y, vote_width, vote_height))
+        pygame.draw.rect(screen, BUTTON_COLOR, (vote_x, vote_y, vote_width, vote_height), 2)
+        
+        # 绘制标题，显示在弹窗外部上方
+        title_text = menu_font.render("新功能投票", True, TEXT_COLOR)
+        # 标题显示在面板外部上方
+        # 绘制半透明背景，增强标题可读性
+        title_bg = pygame.Surface((title_text.get_width() + 20, title_text.get_height() + 10), pygame.SRCALPHA)
+        pygame.draw.rect(title_bg, (0, 0, 0, 150), (0, 0, title_text.get_width() + 20, title_text.get_height() + 10), border_radius=3)
+        # 将标题移到面板外部上方
+        title_bg_y = vote_y - 70 - 5
+        title_y = vote_y - 70
+        screen.blit(title_bg, (vote_x - 10, title_bg_y))
+        screen.blit(title_text, (vote_x, title_y))
+        
+        # 绘制关闭按钮
+        close_btn_size = 30
+        close_btn = pygame.Rect(vote_x + vote_width - close_btn_size - 10, vote_y + 10, close_btn_size, close_btn_size)
+        pygame.draw.rect(screen, (200, 60, 60), close_btn, border_radius=5)
+        pygame.draw.rect(screen, (255, 0, 0), close_btn, 2, border_radius=5)
+        close_text = small_font.render("×", True, TEXT_COLOR)
+        close_text_pos = close_text.get_rect(center=close_btn.center)
+        screen.blit(close_text, close_text_pos)
+        
+        # 绘制提交新功能按钮（简化版，不包含交互逻辑，仅用于动画预览）
+        submit_btn_width = 150
+        submit_btn_height = 40
+        submit_btn = pygame.Rect(vote_x + 20, vote_y + 60, submit_btn_width, submit_btn_height)
+        pygame.draw.rect(screen, (60, 120, 200), submit_btn, border_radius=5)
+        pygame.draw.rect(screen, (0, 0, 0), submit_btn, 2, border_radius=5)
+        submit_text = option_font.render("提交新功能", True, (255, 255, 255))
+        submit_text_pos = submit_text.get_rect(center=submit_btn.center)
+        screen.blit(submit_text, submit_text_pos)
+        
+        # 绘制刷新按钮（简化版，不包含交互逻辑，仅用于动画预览）
+        refresh_btn_width = 100
+        refresh_btn_height = 40
+        refresh_btn = pygame.Rect(vote_x + vote_width - refresh_btn_width - 10, vote_y + 60, refresh_btn_width, refresh_btn_height)
+        pygame.draw.rect(screen, (60, 120, 200), refresh_btn, border_radius=5)
+        pygame.draw.rect(screen, (0, 0, 0), refresh_btn, 2, border_radius=5)
+        refresh_text = small_font.render("刷新数据", True, (255, 255, 255))
+        refresh_text_pos = refresh_text.get_rect(center=refresh_btn.center)
+        screen.blit(refresh_text, refresh_text_pos)
+        
+        # 绘制投票列表标题
+        list_title = option_font.render("热门功能请求", True, TEXT_COLOR)
+        screen.blit(list_title, (vote_x + 20, vote_y + 120))
+        
+        # 添加测试版提示文字
+        beta_text_content = "测试版功能，可能在正式版上线之后关闭此功能"
+        line_height = small_font.get_linesize()
+        max_width = vote_width - 40  # 左右各留20像素边距
+        
+        # 处理文本自动换行
+        wrapped_lines = []
+        current_line = ""
+        for char in beta_text_content:
+            test_line = current_line + char
+            if small_font.size(test_line)[0] <= max_width:
+                current_line = test_line
+            else:
+                wrapped_lines.append(current_line)
+                current_line = char
+        if current_line:
+            wrapped_lines.append(current_line)
+        
+        # 绘制换行后的文本
+        for i, line in enumerate(wrapped_lines):
+            line_surf = small_font.render(line, True, (150, 150, 150))
+            screen.blit(line_surf, (vote_x + 20, vote_y + 150 + i * line_height))
+        
+        # 绘制示例投票内容
+        example_votes = [
+            "• 建议增加更多游戏场景 - 15票",
+            "• 希望优化游戏性能 - 22票",
+            "• 建议添加更多游戏角色 - 8票"
+        ]
+        # 调整示例投票列表的Y偏移量，考虑换行后的高度
+        y_offset = vote_y + 150 + len(wrapped_lines) * line_height + 10
+        for i, text in enumerate(example_votes):
+            text_surf = small_font.render(text, True, TEXT_COLOR)
+            screen.blit(text_surf, (vote_x + 20, y_offset + i * 30))
+
     # 恢复原来的屏幕
     screen = original_screen
 
@@ -2015,6 +2341,14 @@ def draw_animation():
             draw_settings()
         elif prev_state == GameState.GAME_INFO:
             draw_game_info()
+        elif prev_state == GameState.MORE_MENU:
+            draw_more_menu()
+        elif prev_state == GameState.FEEDBACK:
+            draw_feedback()
+        elif prev_state == GameState.FEATURE_VOTE:
+            draw_feature_vote()
+        elif prev_state == GameState.ONLINE_LOBBY:
+            draw_online_lobby()
         
         # 恢复屏幕
         screen = original_screen
@@ -2051,6 +2385,14 @@ def draw_animation():
             draw_settings()
         elif next_state == GameState.GAME_INFO:
             draw_game_info()
+        elif next_state == GameState.MORE_MENU:
+            draw_more_menu()
+        elif next_state == GameState.FEEDBACK:
+            draw_feedback()
+        elif next_state == GameState.FEATURE_VOTE:
+            draw_feature_vote()
+        elif next_state == GameState.ONLINE_LOBBY:
+            draw_online_lobby()
         
         # 恢复屏幕
         screen = original_screen
@@ -2058,6 +2400,8 @@ def draw_animation():
         # 新窗口使用自己状态对应的slide_distance
         if next_state == GameState.COPY_SELECT:
             new_slide_distance = 400  # 开始游戏的动画范围更大
+        elif next_state == GameState.ONLINE_LOBBY:
+            new_slide_distance = 300  # 联机大厅的动画范围适中
         else:
             new_slide_distance = 200  # 其他状态的正常动画范围
         
@@ -2069,10 +2413,14 @@ def draw_animation():
         screen.blit(new_surface, (new_window_x - content_x, 0))
     
     # 7. 更新动画进度 - 调整不同状态的动画速度
-    if next_state in [GameState.SETTINGS, GameState.GAME_INFO]:
-        animation_progress += 0.12  # 设置和游戏信息的动画速度更快，60FPS下约0.15秒完成
+    if next_state == GameState.MAIN_MENU:
+        animation_progress += 0.15  # 返回主菜单时使用更快的淡出速度，60FPS下约0.1秒完成
+    elif next_state in [GameState.SETTINGS, GameState.GAME_INFO, GameState.MORE_MENU, GameState.FEEDBACK, GameState.FEATURE_VOTE]:
+        animation_progress += 0.12  # 设置、游戏信息、更多菜单、反馈和投票的动画速度更快，60FPS下约0.15秒完成
     elif next_state == GameState.COPY_SELECT:
         animation_progress += 0.08  # 开始游戏的动画速度适中，60FPS下约0.2秒完成
+    elif next_state == GameState.ONLINE_LOBBY:
+        animation_progress += 0.10  # 联机大厅的动画速度较快，60FPS下约0.18秒完成
     else:
         animation_progress += 0.06  # 其他状态的默认速度
     
@@ -2134,6 +2482,464 @@ def draw_quit_confirm():
     
     return confirm_btn, cancel_btn
 
+# 联机大厅绘制函数
+def draw_online_lobby():
+    global screen, config, online_client
+    
+    screen.fill((0, 0, 0))  # 设置背景为纯黑色
+    
+    # 绘制标题
+    title_text = menu_font.render("联机大厅", True, (255, 255, 255))  # 白色标题
+    title_rect = title_text.get_rect(center=(config["resolution"][0]//2, 50))
+    screen.blit(title_text, title_rect)
+    
+    # 绘制顶部黄色注意条
+    notice_bg = pygame.Rect(50, 80, config["resolution"][0] - 100, 40)
+    pygame.draw.rect(screen, (255, 255, 200), notice_bg)  # 浅黄色背景
+    pygame.draw.rect(screen, (200, 200, 150), notice_bg, 2)  # 浅棕色边框
+    notice_text = small_font.render("[注意] 服务已暂停，请等待后续开放......", True, (200, 100, 0))  # 橙色文字
+    notice_text_rect = notice_text.get_rect(center=notice_bg.center)
+    screen.blit(notice_text, notice_text_rect)
+    
+    # 主面板背景
+    main_panel_width = config["resolution"][0] - 200
+    main_panel_height = 500
+    main_panel_x = 100
+    main_panel_y = 150
+    pygame.draw.rect(screen, (30, 30, 40), (main_panel_x, main_panel_y, main_panel_width, main_panel_height))  # 深灰色背景
+    pygame.draw.rect(screen, (80, 80, 120), (main_panel_x, main_panel_y, main_panel_width, main_panel_height), 2)  # 深蓝色边框
+    
+    # ================ 加入大厅部分 ================
+    join_section_y = main_panel_y + 20
+    # 加入大厅标题
+    join_title = option_font.render("加入大厅", True, (255, 255, 255))  # 白色标题
+    join_title_rect = join_title.get_rect(topleft=(main_panel_x + 20, join_section_y))
+    screen.blit(join_title, join_title_rect)
+    
+    # 加入大厅说明文字
+    join_desc1 = small_font.render("1、在下方输入朋友发送给你的大厅编号，单击【加入】", True, (180, 180, 180))  # 浅灰色文字
+    join_desc2 = small_font.render("2、启动游戏，选择【多人游戏】，在局域网游戏中加入大厅", True, (180, 180, 180))
+    screen.blit(join_desc1, (main_panel_x + 20, join_section_y + 40))
+    screen.blit(join_desc2, (main_panel_x + 20, join_section_y + 65))
+    
+    # 输入框
+    input_box_width = int(main_panel_width * 0.6)
+    input_box_height = 40
+    input_box_x = main_panel_x + 20
+    input_box_y = join_section_y + 100
+    input_box = pygame.Rect(input_box_x, input_box_y, input_box_width, input_box_height)
+    pygame.draw.rect(screen, (50, 50, 60), input_box)  # 深灰色输入框
+    pygame.draw.rect(screen, (100, 100, 150), input_box, 2)  # 蓝色边框
+    
+    # 输入框提示文字
+    hint_text = small_font.render("编号应该长得像这样: P9LC5L6B3Y", True, (100, 100, 150))  # 蓝色提示文字
+    hint_text_rect = hint_text.get_rect(center=(input_box_x + input_box_width//2, input_box_y + input_box_height//2))
+    screen.blit(hint_text, hint_text_rect)
+    
+    # 按钮通用样式
+    btn_height = 40
+    btn_width = 80
+    
+    # 清除按钮
+    clear_btn = pygame.Rect(input_box_x + input_box_width + 10, input_box_y, btn_width, btn_height)
+    pygame.draw.rect(screen, (60, 60, 80), clear_btn)  # 深灰色按钮
+    pygame.draw.rect(screen, (100, 100, 150), clear_btn, 2)  # 蓝色边框
+    clear_text = small_font.render("清除", True, (200, 200, 255))  # 浅蓝色文字
+    clear_text_rect = clear_text.get_rect(center=clear_btn.center)
+    screen.blit(clear_text, clear_text_rect)
+    
+    # 粘贴按钮
+    paste_btn = pygame.Rect(clear_btn.x + btn_width + 10, input_box_y, btn_width, btn_height)
+    pygame.draw.rect(screen, (60, 60, 80), paste_btn)  # 深灰色按钮
+    pygame.draw.rect(screen, (100, 100, 150), paste_btn, 2)  # 蓝色边框
+    paste_text = small_font.render("粘贴", True, (200, 200, 255))  # 浅蓝色文字
+    paste_text_rect = paste_text.get_rect(center=paste_btn.center)
+    screen.blit(paste_text, paste_text_rect)
+    
+    # 加入按钮
+    join_btn = pygame.Rect(paste_btn.x + btn_width + 10, input_box_y, btn_width, btn_height)
+    pygame.draw.rect(screen, (0, 100, 200), join_btn)  # 蓝色按钮
+    pygame.draw.rect(screen, (50, 150, 255), join_btn, 2)  # 亮蓝色边框
+    join_btn_text = small_font.render("加入", True, (255, 255, 255))  # 白色文字
+    join_btn_text_rect = join_btn_text.get_rect(center=join_btn.center)
+    screen.blit(join_btn_text, join_btn_text_rect)
+    
+    # ================ 创建大厅部分 ================
+    create_section_y = join_section_y + 180
+    # 创建大厅标题
+    create_title = option_font.render("创建大厅", True, (255, 255, 255))  # 白色标题
+    create_title_rect = create_title.get_rect(topleft=(main_panel_x + 20, create_section_y))
+    screen.blit(create_title, create_title_rect)
+    
+    # 创建大厅说明文字
+    create_desc1 = small_font.render("1、进入世界后，在游戏菜单中选择【对局域网开放】", True, (180, 180, 180))  # 浅灰色文字
+    create_desc2 = small_font.render("2、在下方选择此游戏实例，单击【创建】", True, (180, 180, 180))
+    create_desc3 = small_font.render("3、成功创建大厅后，复制大厅编号并发送给你的朋友", True, (180, 180, 180))
+    screen.blit(create_desc1, (main_panel_x + 20, create_section_y + 40))
+    screen.blit(create_desc2, (main_panel_x + 20, create_section_y + 65))
+    screen.blit(create_desc3, (main_panel_x + 20, create_section_y + 90))
+    
+    # 下拉选择框
+    dropdown_width = int(main_panel_width * 0.6)
+    dropdown_height = 40
+    dropdown_x = main_panel_x + 20
+    dropdown_y = create_section_y + 130
+    dropdown = pygame.Rect(dropdown_x, dropdown_y, dropdown_width, dropdown_height)
+    pygame.draw.rect(screen, (50, 50, 60), dropdown)  # 深灰色下拉框
+    pygame.draw.rect(screen, (100, 100, 150), dropdown, 2)  # 蓝色边框
+    
+    # 下拉箭头
+    arrow_x = dropdown_x + dropdown_width - 30
+    arrow_y = dropdown_y + dropdown_height//2 - 5
+    pygame.draw.polygon(screen, (150, 150, 200), [(arrow_x, arrow_y), (arrow_x + 10, arrow_y + 10), (arrow_x + 20, arrow_y)])  # 蓝色箭头
+    
+    # 刷新按钮
+    refresh_btn = pygame.Rect(dropdown_x + dropdown_width + 10, dropdown_y, btn_width, btn_height)
+    pygame.draw.rect(screen, (60, 60, 80), refresh_btn)  # 深灰色按钮
+    pygame.draw.rect(screen, (100, 100, 150), refresh_btn, 2)  # 蓝色边框
+    refresh_text = small_font.render("刷新", True, (200, 200, 255))  # 浅蓝色文字
+    refresh_text_rect = refresh_text.get_rect(center=refresh_btn.center)
+    screen.blit(refresh_text, refresh_text_rect)
+    
+    # 创建按钮
+    create_btn = pygame.Rect(refresh_btn.x + btn_width + 10, dropdown_y, btn_width, btn_height)
+    pygame.draw.rect(screen, (0, 150, 100), create_btn)  # 绿色按钮
+    pygame.draw.rect(screen, (50, 200, 150), create_btn, 2)  # 亮绿色边框
+    create_btn_text = small_font.render("创建", True, (255, 255, 255))  # 白色文字
+    create_btn_text_rect = create_btn_text.get_rect(center=create_btn.center)
+    screen.blit(create_btn_text, create_btn_text_rect)
+    
+    # 绘制返回主菜单按钮
+    back_btn_width = 150
+    back_btn_height = 50
+    back_btn = pygame.Rect(
+        config["resolution"][0] - back_btn_width - 50,
+        config["resolution"][1] - 100,
+        back_btn_width,
+        back_btn_height
+    )
+    pygame.draw.rect(screen, (150, 50, 50), back_btn)  # 深红色按钮
+    pygame.draw.rect(screen, (255, 100, 100), back_btn, 2)  # 亮红色边框
+    back_text = option_font.render("返回主菜单", True, (255, 255, 255))  # 白色文字
+    back_text_rect = back_text.get_rect(center=back_btn.center)
+    screen.blit(back_text, back_text_rect)
+    
+    # 绘制BGM
+    if current_bgm != "menu":
+        play_bgm("menu")
+    
+    # 只返回返回按钮，不返回开始游戏按钮（因为服务已暂停）
+    return None, back_btn
+
+# 更多菜单绘制函数
+def draw_more_menu():
+    # 注意：此处不清除屏幕，依赖于外部绘制的主菜单或动画函数中的主菜单绘制
+    # 根据窗口大小动态调整菜单和按钮大小
+    base_size = min(config["resolution"][0], config["resolution"][1])
+    
+    # 右侧更多菜单面板
+    menu_width = int(base_size * 0.25)  # 菜单宽度占屏幕最小边的25%
+    menu_height = int(base_size * 0.4)  # 增加菜单高度，容纳更多按钮
+    menu_x = config["resolution"][0] - menu_width - 150
+    menu_y = (config["resolution"][1] - menu_height) // 2
+
+    pygame.draw.rect(screen, MENU_BG, (menu_x, menu_y, menu_width, menu_height))
+    pygame.draw.rect(screen, BUTTON_COLOR, (menu_x, menu_y, menu_width, menu_height), 2)
+
+    # 绘制标题
+    title_text = option_font.render("更多选项", True, TEXT_COLOR)
+    title_x = menu_x + (menu_width - title_text.get_width()) // 2
+    title_y = menu_y + 20
+    screen.blit(title_text, (title_x, title_y))
+
+    btn_width = menu_width - 20
+    btn_height = int(base_size * 0.05)  # 按钮高度占屏幕最小边的5%
+    button_y_offset = int(base_size * 0.08)  # 按钮起始位置偏移
+    button_spacing = int(base_size * 0.06)  # 按钮间距
+
+    # 设置按钮
+    setting_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset, btn_width, btn_height)
+    setting_is_hovered = setting_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (60, 120, 200), setting_btn)
+    pygame.draw.rect(screen, (100, 180, 255) if setting_is_hovered else (0, 0, 0), setting_btn, 2)
+    setting_text_color = (255, 255, 255) if setting_is_hovered else (200, 200, 200)
+    setting_text = option_font.render("设置", True, setting_text_color)
+    setting_text_pos = setting_text.get_rect(center=setting_btn.center)
+    screen.blit(setting_text, setting_text_pos)
+
+    # 游戏信息按钮
+    info_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset + button_spacing, btn_width, btn_height)
+    info_is_hovered = info_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (60, 120, 200), info_btn)
+    pygame.draw.rect(screen, (100, 180, 255) if info_is_hovered else (0, 0, 0), info_btn, 2)
+    info_text_color = (255, 255, 255) if info_is_hovered else (200, 200, 200)
+    info_text = option_font.render("游戏信息", True, info_text_color)
+    info_text_pos = info_text.get_rect(center=info_btn.center)
+    screen.blit(info_text, info_text_pos)
+
+    # 反馈按钮
+    feedback_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset + button_spacing * 2, btn_width, btn_height)
+    feedback_is_hovered = feedback_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (60, 120, 200), feedback_btn)
+    pygame.draw.rect(screen, (100, 180, 255) if feedback_is_hovered else (0, 0, 0), feedback_btn, 2)
+    feedback_text_color = (255, 255, 255) if feedback_is_hovered else (200, 200, 200)
+    feedback_text = option_font.render("反馈", True, feedback_text_color)
+    feedback_text_pos = feedback_text.get_rect(center=feedback_btn.center)
+    screen.blit(feedback_text, feedback_text_pos)
+
+    # 新功能投票按钮
+    vote_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset + button_spacing * 3, btn_width, btn_height)
+    vote_is_hovered = vote_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (60, 120, 200), vote_btn)
+    pygame.draw.rect(screen, (100, 180, 255) if vote_is_hovered else (0, 0, 0), vote_btn, 2)
+    vote_text_color = (255, 255, 255) if vote_is_hovered else (200, 200, 200)
+    vote_text = option_font.render("新功能投票", True, vote_text_color)
+    vote_text_pos = vote_text.get_rect(center=vote_btn.center)
+    screen.blit(vote_text, vote_text_pos)
+
+    # 返回主菜单按钮
+    back_btn = pygame.Rect(menu_x + 10, menu_y + button_y_offset + button_spacing * 4, btn_width, btn_height)
+    back_is_hovered = back_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (200, 60, 60), back_btn)
+    pygame.draw.rect(screen, (255, 0, 0) if back_is_hovered else (0, 0, 0), back_btn, 2)
+    back_text_color = (255, 255, 255) if back_is_hovered else (200, 200, 200)
+    back_text = option_font.render("返回", True, back_text_color)
+    back_text_pos = back_text.get_rect(center=back_btn.center)
+    screen.blit(back_text, back_text_pos)
+
+    return setting_btn, info_btn, feedback_btn, vote_btn, back_btn
+
+# 反馈功能绘制函数
+def draw_feedback():
+    global screen, config
+    # 只绘制内容区域，不绘制主菜单（主菜单由draw_animation或main函数单独绘制）
+    
+    # 绘制半透明遮罩，增强弹窗效果
+    mask = pygame.Surface(config["resolution"], pygame.SRCALPHA)
+    pygame.draw.rect(mask, (0, 0, 0, 150), mask.get_rect())
+    screen.blit(mask, (0, 0))
+    
+    # 定义反馈面板的尺寸和位置
+    feedback_width = 500  # 固定宽度，与设置面板一致
+    feedback_height = config["resolution"][1] - 200
+    feedback_x = config["resolution"][0] - feedback_width - 100  # 右侧计算，距离右边100像素，增加边距
+    feedback_y = 120
+    
+    # 绘制弹窗背景
+    pygame.draw.rect(screen, MENU_BG, (feedback_x, feedback_y, feedback_width, feedback_height))
+    pygame.draw.rect(screen, BUTTON_COLOR, (feedback_x, feedback_y, feedback_width, feedback_height), 2)
+    
+    # 绘制标题，显示在弹窗外部上方
+    title_text = menu_font.render("反馈功能", True, TEXT_COLOR)
+    title_x = feedback_x + (feedback_width - title_text.get_width()) // 2
+    title_y = feedback_y - 60  # 将标题移到窗口顶部上方，更高位置
+    screen.blit(title_text, (title_x, title_y))
+    
+    # 绘制关闭按钮
+    close_btn_size = 30
+    close_btn = pygame.Rect(feedback_x + feedback_width - close_btn_size - 10, feedback_y + 10, close_btn_size, close_btn_size)
+    pygame.draw.rect(screen, (200, 60, 60), close_btn, border_radius=5)
+    pygame.draw.rect(screen, (255, 0, 0), close_btn, 2, border_radius=5)
+    close_text = small_font.render("×", True, TEXT_COLOR)
+    close_text_pos = close_text.get_rect(center=close_btn.center)
+    screen.blit(close_text, close_text_pos)
+    
+    # 绘制提交反馈按钮
+    submit_btn_width = 150
+    submit_btn_height = 40
+    submit_btn = pygame.Rect(feedback_x + 20, feedback_y + 60, submit_btn_width, submit_btn_height)
+    submit_is_hovered = submit_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (60, 120, 200), submit_btn, border_radius=5)
+    pygame.draw.rect(screen, (100, 180, 255) if submit_is_hovered else (0, 0, 0), submit_btn, 2, border_radius=5)
+    submit_text = option_font.render("提交反馈", True, (255, 255, 255))
+    submit_text_pos = submit_text.get_rect(center=submit_btn.center)
+    screen.blit(submit_text, submit_text_pos)
+    
+    # 获取反馈数据
+    feedback_data = github_utils.get_feedback_data()
+    
+    # 绘制反馈列表标题
+    list_title = option_font.render("最新反馈", True, TEXT_COLOR)
+    screen.blit(list_title, (feedback_x + 20, feedback_y + 120))
+    
+    # 绘制反馈列表
+    line_height = small_font.get_linesize()
+    y_offset = feedback_y + 160
+    max_items = 5  # 最多显示5条反馈
+    for i, feedback in enumerate(feedback_data[:max_items]):
+        # 绘制反馈标题
+        title_surf = small_font.render(f"• {feedback['title']}", True, TEXT_COLOR)
+        screen.blit(title_surf, (feedback_x + 20, y_offset + i * (line_height * 4)))
+        
+        # 绘制反馈状态
+        state_color = (0, 255, 0) if feedback['state'] == 'open' else (150, 150, 150)
+        state_text = f"状态: {'开放' if feedback['state'] == 'open' else '已关闭'}"
+        state_surf = small_font.render(state_text, True, state_color)
+        screen.blit(state_surf, (feedback_x + 20, y_offset + 20 + i * (line_height * 4)))
+        
+        # 绘制反馈摘要
+        summary_surf = small_font.render(feedback['body'], True, (180, 180, 180))
+        screen.blit(summary_surf, (feedback_x + 20, y_offset + 40 + i * (line_height * 4)))
+    
+    # 绘制查看更多按钮
+    if len(feedback_data) > max_items:
+        view_more_btn = pygame.Rect(feedback_x + feedback_width - 120, feedback_y + feedback_height - 50, 100, 35)
+        view_more_is_hovered = view_more_btn.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, (60, 120, 200), view_more_btn, border_radius=5)
+        pygame.draw.rect(screen, (100, 180, 255) if view_more_is_hovered else (0, 0, 0), view_more_btn, 2, border_radius=5)
+        view_more_text = small_font.render("查看更多", True, (255, 255, 255))
+        view_more_text_pos = view_more_text.get_rect(center=view_more_btn.center)
+        screen.blit(view_more_text, view_more_text_pos)
+    
+    # 绘制刷新按钮
+    refresh_btn = pygame.Rect(feedback_x + feedback_width - 130, feedback_y + 60, 100, 40)
+    refresh_is_hovered = refresh_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (60, 120, 200), refresh_btn, border_radius=5)
+    pygame.draw.rect(screen, (100, 180, 255) if refresh_is_hovered else (0, 0, 0), refresh_btn, 2, border_radius=5)
+    refresh_text = small_font.render("刷新数据", True, (255, 255, 255))
+    refresh_text_pos = refresh_text.get_rect(center=refresh_btn.center)
+    screen.blit(refresh_text, refresh_text_pos)
+    
+    return close_btn, submit_btn, refresh_btn
+
+# 新功能投票绘制函数
+def draw_feature_vote():
+    global screen, config
+    # 只绘制内容区域，不绘制主菜单（主菜单由draw_animation或main函数单独绘制）
+    
+    # 绘制半透明遮罩，增强弹窗效果
+    mask = pygame.Surface(config["resolution"], pygame.SRCALPHA)
+    pygame.draw.rect(mask, (0, 0, 0, 150), mask.get_rect())
+    screen.blit(mask, (0, 0))
+    
+    # 定义投票面板的尺寸和位置
+    vote_width = 500  # 固定宽度，与设置面板一致
+    vote_height = config["resolution"][1] - 200
+    vote_x = config["resolution"][0] - vote_width - 100  # 右侧计算，距离右边100像素，增加边距
+    vote_y = 120
+    
+    # 绘制弹窗背景
+    pygame.draw.rect(screen, MENU_BG, (vote_x, vote_y, vote_width, vote_height))
+    pygame.draw.rect(screen, BUTTON_COLOR, (vote_x, vote_y, vote_width, vote_height), 2)
+    
+    # 绘制标题，显示在弹窗外部上方
+    title_text = menu_font.render("新功能投票", True, TEXT_COLOR)
+    title_x = vote_x + (vote_width - title_text.get_width()) // 2
+    title_y = vote_y - 60  # 将标题移到窗口顶部上方，更高位置
+    screen.blit(title_text, (title_x, title_y))
+    
+    # 绘制关闭按钮
+    close_btn_size = 30
+    close_btn = pygame.Rect(vote_x + vote_width - close_btn_size - 10, vote_y + 10, close_btn_size, close_btn_size)
+    pygame.draw.rect(screen, (200, 60, 60), close_btn, border_radius=5)
+    pygame.draw.rect(screen, (255, 0, 0), close_btn, 2, border_radius=5)
+    close_text = small_font.render("×", True, TEXT_COLOR)
+    close_text_pos = close_text.get_rect(center=close_btn.center)
+    screen.blit(close_text, close_text_pos)
+    
+    # 绘制提交新功能请求按钮
+    submit_btn_width = 150
+    submit_btn_height = 40
+    submit_btn = pygame.Rect(vote_x + 20, vote_y + 60, submit_btn_width, submit_btn_height)
+    submit_is_hovered = submit_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (60, 120, 200), submit_btn, border_radius=5)
+    pygame.draw.rect(screen, (100, 180, 255) if submit_is_hovered else (0, 0, 0), submit_btn, 2, border_radius=5)
+    submit_text = option_font.render("提交新功能", True, (255, 255, 255))
+    submit_text_pos = submit_text.get_rect(center=submit_btn.center)
+    screen.blit(submit_text, submit_text_pos)
+    
+    # 获取新功能投票数据
+    feature_data = github_utils.get_feature_vote_data()
+    
+    # 绘制投票列表标题
+    list_title = option_font.render("热门功能请求", True, TEXT_COLOR)
+    screen.blit(list_title, (vote_x + 20, vote_y + 120))
+    
+    # 添加测试版提示文字
+    beta_text_content = "测试版功能，可能在正式版上线之后关闭此功能"
+    line_height = small_font.get_linesize()
+    max_width = vote_width - 40  # 左右各留20像素边距
+    
+    # 处理文本自动换行
+    wrapped_lines = []
+    current_line = ""
+    for char in beta_text_content:
+        test_line = current_line + char
+        if small_font.size(test_line)[0] <= max_width:
+            current_line = test_line
+        else:
+            wrapped_lines.append(current_line)
+            current_line = char
+    if current_line:
+        wrapped_lines.append(current_line)
+    
+    # 绘制换行后的文本
+    for i, line in enumerate(wrapped_lines):
+        line_surf = small_font.render(line, True, (150, 150, 150))
+        screen.blit(line_surf, (vote_x + 20, vote_y + 150 + i * line_height))
+    
+    # 绘制投票列表
+    y_offset = vote_y + 150 + len(wrapped_lines) * line_height + 10  # 调整Y偏移量，考虑换行后的高度
+    max_items = 5  # 最多显示5条功能请求
+    for i, feature in enumerate(feature_data[:max_items]):
+        # 绘制功能请求标题
+        title_surf = small_font.render(f"• {feature['title']}", True, TEXT_COLOR)
+        screen.blit(title_surf, (vote_x + 20, y_offset + i * (line_height * 4)))
+        
+        # 绘制投票数
+        vote_color = (255, 215, 0)  # 金色
+        vote_text = f"投票: {feature['votes']} 票"
+        vote_surf = small_font.render(vote_text, True, vote_color)
+        screen.blit(vote_surf, (vote_x + 20, y_offset + 20 + i * (line_height * 4)))
+        
+        # 绘制功能请求摘要
+        summary_surf = small_font.render(feature['body'], True, (180, 180, 180))
+        screen.blit(summary_surf, (vote_x + 20, y_offset + 40 + i * (line_height * 4)))
+    
+    # 绘制查看更多按钮
+    if len(feature_data) > max_items:
+        view_more_btn = pygame.Rect(vote_x + vote_width - 120, vote_y + vote_height - 50, 100, 35)
+        view_more_is_hovered = view_more_btn.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(screen, (60, 120, 200), view_more_btn, border_radius=5)
+        pygame.draw.rect(screen, (100, 180, 255) if view_more_is_hovered else (0, 0, 0), view_more_btn, 2, border_radius=5)
+        view_more_text = small_font.render("查看更多", True, (255, 255, 255))
+        view_more_text_pos = view_more_text.get_rect(center=view_more_btn.center)
+        screen.blit(view_more_text, view_more_text_pos)
+    
+    # 绘制刷新按钮
+    refresh_btn = pygame.Rect(vote_x + vote_width - 130, vote_y + 60, 100, 40)
+    refresh_is_hovered = refresh_btn.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(screen, (60, 120, 200), refresh_btn, border_radius=5)
+    pygame.draw.rect(screen, (100, 180, 255) if refresh_is_hovered else (0, 0, 0), refresh_btn, 2, border_radius=5)
+    refresh_text = small_font.render("刷新数据", True, (255, 255, 255))
+    refresh_text_pos = refresh_text.get_rect(center=refresh_btn.center)
+    screen.blit(refresh_text, refresh_text_pos)
+    
+    return close_btn, submit_btn, refresh_btn
+
+# 联机游戏绘制函数
+def draw_online_game():
+    global screen, config, online_client, other_players, player
+    
+    # 绘制地图背景
+    draw_hospital()
+    
+    # 绘制其他玩家
+    if online_client and online_client.connected:
+        players = online_client.get_players()
+        for player_id, player_data in players.items():
+            if player_id != online_client.player_id:
+                # 其他玩家使用不同颜色
+                other_player_rect = pygame.Rect(
+                    player_data['x'] - player.width//2 - camera_x,
+                    player_data['y'] - player.height//2 - camera_y,
+                    player.width,
+                    player.height
+                )
+                pygame.draw.rect(screen, (100, 100, 255), other_player_rect)
+    
+    return None
+
 # 设置界面绘制（修复settings_scroll_y未定义：显式声明全局变量在函数开头）
 def draw_settings():
     global screen, settings_scroll_y, config  # 关键修复：在函数开头声明global，避免UnboundLocalError
@@ -2141,17 +2947,30 @@ def draw_settings():
     # 使用公共函数计算面板位置，确保与handle_events一致
     panel_x, panel_y, panel_width, panel_height = calculate_panel_position(config["resolution"])
     
-    title_text = menu_font.render("游戏设置", True, TEXT_COLOR)
-    # 标题显示在面板上方，与面板左对齐
-    # 绘制半透明背景，增强标题可读性
-    title_bg = pygame.Surface((title_text.get_width() + 20, title_text.get_height() + 10), pygame.SRCALPHA)
-    pygame.draw.rect(title_bg, (0, 0, 0, 150), (0, 0, title_text.get_width() + 20, title_text.get_height() + 10), border_radius=3)
-    screen.blit(title_bg, (panel_x - 10, 50 - 5))
-    screen.blit(title_text, (panel_x, 50))
-    panel_bottom_y = panel_y + panel_height
-
+    # 绘制半透明遮罩，增强弹窗效果
+    mask = pygame.Surface(config["resolution"], pygame.SRCALPHA)
+    pygame.draw.rect(mask, (0, 0, 0, 150), mask.get_rect())
+    screen.blit(mask, (0, 0))
+    
+    # 绘制弹窗背景
     pygame.draw.rect(screen, MENU_BG, (panel_x, panel_y, panel_width, panel_height))
     pygame.draw.rect(screen, BUTTON_COLOR, (panel_x, panel_y, panel_width, panel_height), 2)
+    
+    # 绘制标题，显示在弹窗外部上方
+    title_text = menu_font.render("游戏设置", True, TEXT_COLOR)
+    title_x = panel_x + (panel_width - title_text.get_width()) // 2
+    title_y = panel_y - 60  # 将标题移到窗口顶部上方，更高位置
+    screen.blit(title_text, (title_x, title_y))
+    panel_bottom_y = panel_y + panel_height
+    
+    # 绘制关闭按钮
+    close_btn_size = 30
+    close_btn = pygame.Rect(panel_x + panel_width - close_btn_size - 10, panel_y + 10, close_btn_size, close_btn_size)
+    pygame.draw.rect(screen, (200, 60, 60), close_btn, border_radius=5)
+    pygame.draw.rect(screen, (255, 0, 0), close_btn, 2, border_radius=5)
+    close_text = small_font.render("×", True, TEXT_COLOR)
+    close_text_pos = close_text.get_rect(center=close_btn.center)
+    screen.blit(close_text, close_text_pos)
 
     # 滚动容器（所有设置项绘制在滚动表面上）
     scroll_surface = pygame.Surface((panel_width - 40, 1000), pygame.SRCALPHA)
@@ -2277,19 +3096,54 @@ def draw_settings():
     sfx_thumb_color = SLIDER_THUMB_HOVER_COLOR if screen_sfx_thumb_rect.collidepoint(pygame.mouse.get_pos()) else SLIDER_THUMB_COLOR
     pygame.draw.circle(scroll_surface, sfx_thumb_color, (sfx_thumb_x + bgm_thumb_radius, sfx_thumb_y + bgm_thumb_radius), bgm_thumb_radius)
 
+    # 联机模式设置
+    online_title = option_font.render("联机模式", True, TEXT_COLOR)
+    online_y = sfx_slider_y + 80
+    scroll_surface.blit(online_title, (0, online_y))
+    
+    # 联机模式开关
+    online_label = small_font.render("开启联机模式", True, TEXT_COLOR)
+    scroll_surface.blit(online_label, (0, online_y + 40))
+    
+    # 开关按钮
+    toggle_width = 60
+    toggle_height = 30
+    toggle_x = 200
+    toggle_y = online_y + 35
+    toggle_rect = pygame.Rect(toggle_x, toggle_y, toggle_width, toggle_height)
+    
+    # 绘制开关背景
+    pygame.draw.rect(scroll_surface, (60, 60, 60), toggle_rect, border_radius=15)
+    
+    # 绘制开关滑块
+    thumb_x = toggle_x + 5 + (toggle_width - 20) * online_mode
+    pygame.draw.circle(scroll_surface, (255, 255, 255), (thumb_x + 10, toggle_y + 15), 10)
+    
+    # 显示当前状态
+    status_text = "在线" if online_mode else "离线"
+    status_color = (0, 255, 0) if online_mode else (255, 0, 0)
+    status_surf = small_font.render(status_text, True, status_color)
+    scroll_surface.blit(status_surf, (toggle_x + toggle_width + 15, toggle_y + 5))
+    
+    # 绘制服务器地址
+    if online_mode:
+        server_label = small_font.render("服务器地址: localhost:5555", True, TEXT_COLOR)
+        scroll_surface.blit(server_label, (0, online_y + 80))
+
     # 计算滚动范围
-    total_content_height = sfx_slider_y + 50
+    total_content_height = online_y + 120
     max_scroll_y = max(0, total_content_height - (panel_height - 40))
     settings_scroll_y = max(-max_scroll_y, min(0, settings_scroll_y))
 
-    # 绘制滚动内容（裁剪到面板范围内）
-    screen.blit(scroll_surface, (panel_x + 20, panel_y + 20), area=(0, -settings_scroll_y, panel_width - 40, panel_height - 40))
+    # 绘制滚动内容（裁剪到面板范围内），添加标题高度偏移量，避免与标题重叠
+    title_height_offset = 40  # 标题占用的高度
+    screen.blit(scroll_surface, (panel_x + 20, panel_y + 20 + title_height_offset), area=(0, -settings_scroll_y, panel_width - 40, panel_height - 60))
 
     # 滚动条
     if max_scroll_y > 0:
         scrollbar_width = 6
-        scrollbar_height = (panel_height - 40) / total_content_height * (panel_height - 40)
-        scrollbar_y = panel_y + 20 + (-settings_scroll_y / max_scroll_y) * (panel_height - 40 - scrollbar_height)
+        scrollbar_height = (panel_height - 60) / total_content_height * (panel_height - 60)
+        scrollbar_y = panel_y + 20 + title_height_offset + (-settings_scroll_y / max_scroll_y) * (panel_height - 60 - scrollbar_height)
         pygame.draw.rect(screen, BUTTON_HOVER, (panel_x + panel_width - 30, scrollbar_y, scrollbar_width, scrollbar_height), border_radius=3)
 
     # 播放菜单BGM
@@ -2335,12 +3189,21 @@ def draw_settings():
         bgm_thumb_radius * 2,
         bgm_thumb_radius * 2
     )
+    
+    # 联机模式开关的屏幕坐标Rect
+    online_toggle_screen_rect = pygame.Rect(
+        panel_x + 20 + toggle_x,
+        panel_y + 20 + toggle_y + settings_scroll_y,
+        toggle_width,
+        toggle_height
+    )
 
-    # 返回所有可交互元素的Rect（用于事件处理），不包括返回按钮
-    return None, shortcut_rects, reset_rects, res_rects, fps_rects, bgm_slider_screen_rect, sfx_slider_screen_rect, bgm_thumb_screen_rect, sfx_thumb_screen_rect
+    # 返回所有可交互元素的Rect（用于事件处理），包括关闭按钮
+    return close_btn, shortcut_rects, reset_rects, res_rects, fps_rects, bgm_slider_screen_rect, sfx_slider_screen_rect, bgm_thumb_screen_rect, sfx_thumb_screen_rect, online_toggle_screen_rect
 # 事件处理函数（修复global声明位置错误）
 
 # 事件处理函数
+
 def handle_events():
     # 所有需要修改的全局变量，统一在函数开头声明
     global is_paused, gate_is_open, cafe_gate_is_open, gate_cooldown
@@ -2348,6 +3211,7 @@ def handle_events():
     global info_scroll_y, settings_scroll_y, current_res_idx, current_fps_idx, current_fps, camera_x, camera_y, config
     global bgm_volume, sfx_volume, dragging_bgm_slider, dragging_sfx_slider
     global bgm_slider_rect_global, sfx_slider_rect_global, screen, key_states, show_input_tip, prev_game_state
+    global online_client, online_mode, other_players
     # 动画相关全局变量
     global is_animating, prev_state, next_state
     
@@ -2421,7 +3285,9 @@ def handle_events():
                             gate_is_open = True
                             play_sfx(gate_sound)
                         else:
-                            gate_is_open = False
+                            # 防卡门系统：检查玩家是否在门内，如果在门内则禁止关门
+                            if not player_rect.colliderect(GATE_RECT):
+                                gate_is_open = False
                         gate_cooldown = 60  # 1秒冷却（避免重复触发）
                 elif current_state == GameState.CAFE:
                     if is_player_near_cafe_gate(player_rect):
@@ -2462,14 +3328,23 @@ def handle_events():
         # 鼠标滚轮事件（游戏信息/设置界面滚动）
         if event.type == pygame.MOUSEWHEEL:
             if not is_paused:  # 暂停时不响应滚动（优化体验）
-                if current_state == GameState.GAME_INFO:
+                if current_state == GameState.GAME_INFO or current_state == GameState.ABOUT:
                     # 滚动速度设置为20像素
                     scroll_speed = 20
                     info_scroll_y += event.y * scroll_speed
+                    # 立即限制滚动位置，防止超出有效范围，减少抽动
+                    # 使用非常大的负值作为最小限制，适应更长的内容
+                    info_scroll_y = max(-10000, min(0, info_scroll_y))
                 elif current_state == GameState.SETTINGS:
                     settings_scroll_y += event.y * 20
+                    # 立即限制设置界面滚动位置
+                    # 使用非常大的负值作为最小限制，适应更长的内容
+                    settings_scroll_y = max(-10000, min(0, settings_scroll_y))
                 elif current_state == GameState.GAME_SETTINGS:
                     settings_scroll_y += event.y * 20
+                    # 立即限制游戏中设置界面滚动位置
+                    # 使用非常大的负值作为最小限制，适应更长的内容
+                    settings_scroll_y = max(-10000, min(0, settings_scroll_y))
 
         # 鼠标点击事件（所有界面按钮交互）
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -2477,7 +3352,7 @@ def handle_events():
                 # 当处于游戏中的设置界面时，不处理主菜单按钮
                 if current_state != GameState.GAME_SETTINGS:
                     # 主菜单界面 - 无论当前状态是什么，都检查主菜单按钮，因为我们保留了主菜单
-                    start_btn, setting_btn, info_btn, quit_btn, github_rect = draw_main_menu()
+                    start_btn, more_btn, online_btn, quit_btn, github_rect = draw_main_menu()
                     
                     # 动画正在运行时，忽略所有按钮点击（除了退出确认）
                     if not is_animating:
@@ -2489,22 +3364,23 @@ def handle_events():
                                 prev_state = current_state
                                 next_state = GameState.COPY_SELECT
                                 animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
-                        elif setting_btn.collidepoint(mouse_pos):
-                            # 只有当前状态不是设置时，才触发动画
-                            if current_state != GameState.SETTINGS:
-                                # 触发动画，从当前状态切换到设置
+                        elif more_btn.collidepoint(mouse_pos):
+                            # 只有当前状态不是更多菜单时，才触发动画
+                            if current_state != GameState.MORE_MENU:
+                                # 触发动画，从当前状态切换到更多菜单
                                 is_animating = True
                                 prev_state = current_state
-                                next_state = GameState.SETTINGS
+                                next_state = GameState.MORE_MENU
                                 animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
-                        elif info_btn.collidepoint(mouse_pos):
-                            # 只有当前状态不是游戏信息时，才触发动画
-                            if current_state != GameState.GAME_INFO:
-                                # 触发动画，从当前状态切换到游戏信息
-                                is_animating = True
-                                prev_state = current_state
-                                next_state = GameState.GAME_INFO
-                                animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+                        elif online_btn.collidepoint(mouse_pos):
+                            # 触发动画，从当前状态切换到联机大厅
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = GameState.ONLINE_LOBBY
+                            animation_progress = 0.0  # 重置动画进度
+                            online_mode = True
+                            # 服务暂停，不连接服务器
+                            online_client = None
                         elif quit_btn.collidepoint(mouse_pos):
                             # 显示退出确认弹窗，不使用动画
                             current_state = GameState.QUIT_CONFIRM
@@ -2546,8 +3422,8 @@ def handle_events():
                         # 进入咖啡厅场景
                         current_state = GameState.CAFE
                         # 重置玩家位置和咖啡厅大门状态
-                        player.x = CAFE_MAP_WIDTH // 2
-                        player.y = CAFE_FLOOR_HEIGHT // 2
+                        player.x = CAFE_GATE_X + CAFE_GATE_WIDTH // 2  # 门的中心位置
+                        player.y = CAFE_FLOOR_HEIGHT + 150  # 更远处的街道区域
                         cafe_gate_is_open = False
                         # 重置输入法提示状态
                         show_input_tip = True
@@ -2555,15 +3431,148 @@ def handle_events():
                         # 结婚现场暂未开放，显示提示
                         print("💍 结婚现场副本暂未开放，敬请期待后续更新！")
 
+                # 更多菜单界面
+                elif current_state == GameState.MORE_MENU:
+                    setting_btn, info_btn, feedback_btn, vote_btn, back_btn = draw_more_menu()
+                    if setting_btn.collidepoint(mouse_pos):
+                        # 触发动画，从更多菜单切换到设置
+                        is_animating = True
+                        prev_state = current_state
+                        next_state = GameState.SETTINGS
+                        animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+                    elif info_btn.collidepoint(mouse_pos):
+                        # 触发动画，从更多菜单切换到游戏信息
+                        is_animating = True
+                        prev_state = current_state
+                        next_state = GameState.GAME_INFO
+                        animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+                    elif feedback_btn.collidepoint(mouse_pos):
+                        # 触发动画，从更多菜单切换到反馈功能
+                        is_animating = True
+                        prev_state = current_state
+                        next_state = GameState.FEEDBACK
+                        animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+                    elif vote_btn.collidepoint(mouse_pos):
+                        # 触发动画，从更多菜单切换到新功能投票
+                        is_animating = True
+                        prev_state = current_state
+                        next_state = GameState.FEATURE_VOTE
+                        animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+                    elif back_btn.collidepoint(mouse_pos):
+                        # 触发动画，从更多菜单返回主菜单
+                        is_animating = True
+                        prev_state = current_state
+                        next_state = GameState.MAIN_MENU
+                        animation_progress = 0.0  # 重置动画进度，确保每次动画都从头开始
+
                 # 游戏信息界面
                 elif current_state == GameState.GAME_INFO:
-                    draw_game_info()  # 修复返回值解包错误
+                    close_btn = draw_game_info()  # 获取关闭按钮
+                    # 处理关闭按钮点击
+                    if close_btn.collidepoint(mouse_pos):
+                        # 触发淡出动画，返回主菜单或上一个状态
+                        if prev_game_state in [GameState.HOSPITAL, GameState.CAFE]:
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = prev_game_state
+                            animation_progress = 0.0
+                        elif prev_state == GameState.MORE_MENU:
+                            # 如果是从更多菜单进入的，返回更多菜单
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = GameState.MORE_MENU
+                            animation_progress = 0.0
+                        else:
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = GameState.MAIN_MENU
+                            animation_progress = 0.0
+                elif current_state == GameState.FEEDBACK:
+                    close_btn, submit_btn, refresh_btn = draw_feedback()  # 获取关闭按钮和新按钮
+                    # 处理关闭按钮点击
+                    if close_btn.collidepoint(mouse_pos):
+                        # 触发淡出动画，返回主菜单或上一个状态
+                        if prev_game_state in [GameState.HOSPITAL, GameState.CAFE]:
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = prev_game_state
+                            animation_progress = 0.0
+                        elif prev_state == GameState.MORE_MENU:
+                            # 如果是从更多菜单进入的，返回更多菜单
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = GameState.MORE_MENU
+                            animation_progress = 0.0
+                        else:
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = GameState.MAIN_MENU
+                            animation_progress = 0.0
+                    # 处理提交反馈按钮点击
+                    elif submit_btn.collidepoint(mouse_pos):
+                        # 打开GitHub反馈页面
+                        feedback_url = github_utils.open_github_feedback()
+                        webbrowser.open(feedback_url)
+                    # 处理刷新数据按钮点击
+                    elif refresh_btn.collidepoint(mouse_pos):
+                        # 清除缓存，强制刷新数据
+                        github_utils.clear_cache("feedback")
+                        github_utils.get_feedback_data()  # 立即获取新数据
+                elif current_state == GameState.FEATURE_VOTE:
+                    close_btn, submit_btn, refresh_btn = draw_feature_vote()  # 获取关闭按钮和新按钮
+                    # 处理关闭按钮点击
+                    if close_btn.collidepoint(mouse_pos):
+                        # 触发淡出动画，返回主菜单或上一个状态
+                        if prev_game_state in [GameState.HOSPITAL, GameState.CAFE]:
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = prev_game_state
+                            animation_progress = 0.0
+                        elif prev_state == GameState.MORE_MENU:
+                            # 如果是从更多菜单进入的，返回更多菜单
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = GameState.MORE_MENU
+                            animation_progress = 0.0
+                        else:
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = GameState.MAIN_MENU
+                            animation_progress = 0.0
+                    # 处理提交新功能按钮点击
+                    elif submit_btn.collidepoint(mouse_pos):
+                        # 打开GitHub新功能请求页面
+                        feature_url = github_utils.open_github_feature_request()
+                        webbrowser.open(feature_url)
+                    # 处理刷新数据按钮点击
+                    elif refresh_btn.collidepoint(mouse_pos):
+                        # 清除缓存，强制刷新数据
+                        github_utils.clear_cache("feature_request")
+                        github_utils.get_feature_vote_data()  # 立即获取新数据
 
                 # 设置界面（处理分辨率、帧率、快捷键、音量滑杆）
                 elif current_state == GameState.SETTINGS:
                     # 调用draw_settings函数
-                    back_btn, shortcut_rects, reset_rects, res_rects, fps_rects, bgm_slider_rect, sfx_slider_rect, bgm_thumb_rect, sfx_thumb_rect = draw_settings()
-                    # 不再处理返回按钮，因为已经删除了
+                    close_btn, shortcut_rects, reset_rects, res_rects, fps_rects, bgm_slider_rect, sfx_slider_rect, bgm_thumb_rect, sfx_thumb_rect, online_toggle_rect = draw_settings()
+                    # 处理关闭按钮点击
+                    if close_btn.collidepoint(mouse_pos):
+                        # 触发淡出动画，返回主菜单或上一个状态
+                        if prev_game_state in [GameState.HOSPITAL, GameState.CAFE]:
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = prev_game_state
+                            animation_progress = 0.0
+                        elif prev_state == GameState.MORE_MENU:
+                            # 如果是从更多菜单进入的，返回更多菜单
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = GameState.MORE_MENU
+                            animation_progress = 0.0
+                        else:
+                            is_animating = True
+                            prev_state = current_state
+                            next_state = GameState.MAIN_MENU
+                            animation_progress = 0.0
                     # 分辨率选择
                     for res_rect, idx in res_rects:
                         if res_rect.collidepoint(mouse_pos):
@@ -2629,6 +3638,22 @@ def handle_events():
                         if gate_sound:
                             gate_sound.set_volume(sfx_volume)
                         print(f"SFX滑块点击: 位置={slider_x}, 音量={sfx_volume*100:.0f}%")
+                    # 联机模式开关处理
+                    if online_toggle_rect.collidepoint(mouse_pos):
+                        # 切换联机模式状态
+                        online_mode = not online_mode
+                        if online_mode:
+                            print("🔗 已开启联机模式")
+                            # 创建客户端并尝试连接服务器
+                            if online_client is None:
+                                online_client = GameClient()
+                                online_client.connect()
+                        else:
+                            print("🔌 已关闭联机模式")
+                            # 断开连接
+                            if online_client:
+                                online_client.disconnect()
+                                online_client = None
 
                 # 剧情对话框（点击继续/关闭）
                 elif current_state == GameState.DIALOG:
@@ -2689,6 +3714,22 @@ def handle_events():
                             
                             # 点击滑杆直接定位到点击位置
                             mouse_x, mouse_y = mouse_pos
+                        elif element_type == "online_toggle" and element.collidepoint(mouse_pos):
+                            # 处理联机模式开关
+                            online_mode = not online_mode
+                            # 如果开启联机模式，创建客户端并尝试连接
+                            if online_mode:
+                                print("🔗 已开启联机模式")
+                                if online_client is None:
+                                    online_client = GameClient()
+                                    online_client.connect()
+                            else:
+                                print("🔌 已关闭联机模式")
+                                # 如果关闭联机模式，断开连接
+                                if online_client:
+                                    online_client.disconnect()
+                                    online_client = None
+                            break
                             # 计算鼠标在滑块背景上的相对位置
                             slider_x = mouse_x - slider_rect.x
                             raw_volume = slider_x / slider_bg_width  # 使用滑块背景的宽度
@@ -2723,6 +3764,23 @@ def handle_events():
                             sfx_volume = max(0.0, min(1.0, raw_volume))
                             if 'gate_sound' in globals() and gate_sound:
                                 gate_sound.set_volume(sfx_volume)
+                # 联机大厅
+                elif current_state == GameState.ONLINE_LOBBY:
+                    # 绘制联机大厅界面
+                    start_btn, back_btn = draw_online_lobby()
+                    
+                    # 处理按钮点击
+                    # 服务已暂停，只处理返回按钮
+                    if back_btn.collidepoint(mouse_pos):
+                        # 触发动画，从联机大厅返回主菜单
+                        is_animating = True
+                        prev_state = GameState.ONLINE_LOBBY
+                        next_state = GameState.MAIN_MENU
+                        animation_progress = 0.0  # 重置动画进度
+                        if online_client:
+                            online_client.disconnect()
+                            online_client = None
+                        online_mode = False
 
                 # 暂停界面按钮（存档/设置/返回副本选择）
                 elif is_paused and current_state in [GameState.HOSPITAL, GameState.CAFE]:
@@ -2857,6 +3915,16 @@ def main():
             if current_state == GameState.HOSPITAL and not dialog_shown and current_dialog_index == 0:
                 dialog_shown = True
                 current_state = GameState.DIALOG
+            
+            # 联机模式下发送玩家状态到服务器
+            if online_mode and current_state == GameState.ONLINE_GAME and online_client and online_client.connected:
+                player_data = {
+                    'x': player.x,
+                    'y': player.y,
+                    'direction': player.last_direction,
+                    'is_moving': player.is_moving
+                }
+                online_client.send(player_data)
 
         # 场景绘制（根据当前状态绘制对应界面）
         if is_animating:
@@ -2870,20 +3938,31 @@ def main():
             # 正常绘制当前状态
             screen.fill(BG_COLOR)  # 先清除屏幕
             
-            # 无论当前状态是什么，都先绘制主菜单（固定不动）
-            draw_main_menu()
-            
-            # 然后根据当前状态绘制对应内容
-            if current_state == GameState.COPY_SELECT:
+            # 根据当前状态绘制对应内容
+            if current_state == GameState.MAIN_MENU:
+                draw_main_menu()
+            elif current_state == GameState.COPY_SELECT:
+                draw_main_menu()
                 draw_copy_select()
             elif current_state == GameState.HOSPITAL:
                 draw_hospital()
             elif current_state == GameState.CAFE:
                 draw_cafe()
             elif current_state == GameState.GAME_INFO:
+                draw_main_menu()
                 draw_game_info()
             elif current_state == GameState.SETTINGS:
+                draw_main_menu()
                 draw_settings()
+            elif current_state == GameState.MORE_MENU:
+                draw_main_menu()
+                draw_more_menu()
+            elif current_state == GameState.FEEDBACK:
+                draw_main_menu()
+                draw_feedback()
+            elif current_state == GameState.FEATURE_VOTE:
+                draw_main_menu()
+                draw_feature_vote()
             elif current_state == GameState.DIALOG:
                 # 剧情对话框在医院场景上叠加绘制
                 if current_dialog_index < len(dialog_content):
@@ -2903,6 +3982,12 @@ def main():
                     draw_cafe()
                 # 然后绘制设置框
                 draw_game_settings()
+            elif current_state == GameState.ONLINE_LOBBY:
+                # 绘制联机大厅，不显示主菜单
+                draw_online_lobby()
+            elif current_state == GameState.ONLINE_GAME:
+                # 绘制联机游戏场景
+                draw_online_game()
 
         # 刷新屏幕
         pygame.display.flip()
