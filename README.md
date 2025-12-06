@@ -20,46 +20,31 @@
 - **版本控制**：Git
 - **代码风格**：PEP 8
 
-## 安装与运行
+## 下载与运行
 
-### 前提条件
+### 下载游戏
 
-- Python 3.8 或更高版本
-- Git（可选，用于克隆仓库）
-
-### 安装步骤
-
-1. **克隆仓库**（或直接下载源码）
-   ```bash
-   git clone https://github.com/Hello-ABYDOS-27/EF-ADH-main.git
-   cd EF-ADH-main
-   ```
-
-2. **创建虚拟环境**（可选但推荐）
-   ```bash
-   python -m venv .venv
-   ```
-
-3. **激活虚拟环境**
-   - Windows：
-     ```bash
-     .venv\Scripts\activate
-     ```
-   - macOS/Linux：
-     ```bash
-     source .venv/bin/activate
-     ```
-
-4. **安装依赖**
-   ```bash
-   pip install -r requirements.txt
-   ```
+1. **下载压缩包**：
+   - 访问GitHub仓库：[https://github.com/Hello-ABYDOS-27/EF-ADH-main](https://github.com/Hello-ABYDOS-27/EF-ADH-main)
+   - 点击绿色的 "Code" 按钮
+   - 选择 "Download ZIP"
+   - 下载完成后，解压压缩包到您想要安装游戏的位置
 
 ### 运行游戏
 
-```bash
-python main.py
-```
+1. **打开游戏目录**：
+   - 解压后，进入解压后的文件夹 `EF-ADH-main`
+
+2. **运行游戏**：
+   - 找到并双击 `game.exe` 文件
+   - 游戏将自动启动
+
+### 注意事项
+
+- 游戏仅支持Windows系统
+- 确保您的系统已安装DirectX或OpenGL图形库
+- 首次运行游戏可能需要一些时间加载资源
+- 建议关闭其他占用大量系统资源的程序，以获得最佳游戏体验
 
 ## 游戏操作
 
